@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ObsEvent",
+  "description": "Canonical event envelope for the observability pipeline",
+  "type": "object",
+  "required": ["eventId", "schemaVersion", "source", "timestamp", "level", "payload"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier — used for idempotency on DB writes"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Increment on breaking schema changes. Consumers must tolerate v-1."
+    },
+    "source": {
+      "type": "object",
+      "required": ["service", "environment"],
+      "properties": {
+        "service": {
+          "type": "string",
+          "description": "Emitting service name, e.g. 'payments-api'"
+        },
+        "instance": { "type": "string", "description": "Pod/host identifier, optional" },
+        "environment": { "type": "string", "enum": ["development", "staging", "production"] },
+        "version": { "type": "string", "description": "Service semver, optional" }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC — set by the emitting service, not the ingestor"
+    },
+    "level": {
+      "type": "string",
+      "enum": ["debug", "info", "warn", "error", "critical"]
+    },
+    "category": {
+      "type": "string",
+      "enum": ["log", "metric", "trace", "event"],
+      "description": "Drives downstream routing and storage strategy"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Arbitrary structured data — validated loosely, enricher adds known fields",
+      "properties": {
+        "message": { "type": "string" },
+        "durationMs": { "type": "number", "description": "For latency metrics" },
+        "statusCode": { "type": "integer" },
+        "traceId": { "type": "string" },
+        "spanId": { "type": "string" },
+        "tags": { "type": "object", "additionalProperties": { "type": "string" } },
+        "numeric": {
+          "type": "object",
+          "description": "Named numeric values — these are what the anomaly detector watches",
+          "additionalProperties": { "type": "number" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "enrichment": {
+      "type": "object",
+      "description": "Populated by the enricher service — absent on raw events",
+      "properties": {
+        "geoIp": {
+          "type": "object",
+          "properties": {
+            "country": { "type": "string" },
+            "region": { "type": "string" },
+            "city": { "type": "string" },
+            "latitude": { "type": "number" },
+            "longitude": { "type": "number" }
+          }
+        },
+        "serviceMeta": {
+          "type": "object",
+          "properties": {
+            "team": { "type": "string" },
+            "tier": { "type": "string", "enum": ["critical", "standard", "internal"] },
+            "dependsOn": { "type": "array", "items": { "type": "string" } },
+            "alertOwner": { "type": "string" }
+          }
+        },
+        "enrichedAt": { "type": "string", "format": "date-time" },
+        "enricherVersion": { "type": "string" }
+      }
+    }
+  }
+}

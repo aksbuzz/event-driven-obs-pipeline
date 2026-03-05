@@ -1,0 +1,34 @@
+{
+  "services": {
+    "payments-api": {
+      "team": "payments",
+      "tier": "critical",
+      "dependsOn": ["postgres-payments", "redis-sessions", "fraud-service"],
+      "alertOwner": "payments-oncall@company.com"
+    },
+    "auth-service": {
+      "team": "platform",
+      "tier": "critical",
+      "dependsOn": ["postgres-auth", "redis-tokens"],
+      "alertOwner": "platform-oncall@company.com"
+    },
+    "notification-worker": {
+      "team": "growth",
+      "tier": "standard",
+      "dependsOn": ["kafka", "sendgrid-api"],
+      "alertOwner": "growth-eng@company.com"
+    },
+    "inventory-api": {
+      "team": "catalog",
+      "tier": "standard",
+      "dependsOn": ["postgres-catalog", "elasticsearch"],
+      "alertOwner": "catalog-eng@company.com"
+    },
+    "analytics-ingestor": {
+      "team": "data",
+      "tier": "internal",
+      "dependsOn": ["kafka", "clickhouse"],
+      "alertOwner": "data-eng@company.com"
+    }
+  }
+}
