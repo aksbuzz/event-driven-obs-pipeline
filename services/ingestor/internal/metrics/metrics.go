@@ -10,33 +10,44 @@ import (
 )
 
 type Metrics struct {
-	IngestTotal   prometheus.Counter
-	IngestErrors  prometheus.Counter
-	IngestLatency prometheus.Histogram
-	HTTPRequests  *prometheus.CounterVec
-	HTTPDuration  *prometheus.HistogramVec
+	IngestTotal             prometheus.Counter
+	IngestValidationErrors  prometheus.Counter
+	IngestPublishErrors     prometheus.Counter
+	DLQPublishErrors        prometheus.Counter
+	IngestLatency           prometheus.Histogram
+	HTTPRequests            *prometheus.CounterVec
+	HTTPDuration            *prometheus.HistogramVec
 }
 
-func New() *Metrics {
+func New(reg prometheus.Registerer) *Metrics {
+	factory := promauto.With(reg)
 	return &Metrics{
-		IngestTotal: promauto.NewCounter(prometheus.CounterOpts{
+		IngestTotal: factory.NewCounter(prometheus.CounterOpts{
 			Name: "ingestor_events_total",
 			Help: "Total events successfully published to Kafka",
 		}),
-		IngestErrors: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "ingestor_events_errors_total",
-			Help: "Total events routed to DLQ due to validation or publish errors",
+		IngestValidationErrors: factory.NewCounter(prometheus.CounterOpts{
+			Name: "ingestor_events_validation_errors_total",
+			Help: "Total events that failed schema validation and were routed to DLQ",
 		}),
-		IngestLatency: promauto.NewHistogram(prometheus.HistogramOpts{
+		IngestPublishErrors: factory.NewCounter(prometheus.CounterOpts{
+			Name: "ingestor_events_publish_errors_total",
+			Help: "Total events that failed Kafka publish and were routed to DLQ",
+		}),
+		DLQPublishErrors: factory.NewCounter(prometheus.CounterOpts{
+			Name: "ingestor_events_dlq_publish_errors_total",
+			Help: "Total events that could not be published to the DLQ (event silently lost)",
+		}),
+		IngestLatency: factory.NewHistogram(prometheus.HistogramOpts{
 			Name:    "ingestor_event_latency_seconds",
 			Help:    "End-to-end latency from request receipt to Kafka ack",
 			Buckets: prometheus.DefBuckets,
 		}),
-		HTTPRequests: promauto.NewCounterVec(prometheus.CounterOpts{
+		HTTPRequests: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "ingestor_http_requests_total",
 			Help: "HTTP requests by method, path, and status code",
 		}, []string{"method", "path", "status"}),
-		HTTPDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+		HTTPDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "ingestor_http_duration_seconds",
 			Help:    "HTTP request duration by method and path",
 			Buckets: prometheus.DefBuckets,

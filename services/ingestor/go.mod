@@ -3,7 +3,7 @@ module github.com/aksbuzz/obs-pipeline/services/ingestor
 go 1.26.0
 
 require (
-	github.com/confluentinc/confluent-kafka-go/v2 v2.13.3
+	github.com/confluentinc/confluent-kafka-go/v2 v2.4.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2

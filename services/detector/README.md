@@ -1,1 +1,0 @@
-# Python - anomaly detection consumer

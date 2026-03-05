@@ -45,6 +45,7 @@ func main() {
 
 	// Enrichment pipeline (stateless, composable steps)
 	pipeline := enricher.NewPipeline(
+		m.StepErrors,
 		enricher.NewGeoIPEnricher(cfg.GeoIPDBPath, logger),
 		enricher.NewServiceMetaEnricher(cfg.ServiceRegistryPath, logger),
 		enricher.NewTimestampEnricher(),

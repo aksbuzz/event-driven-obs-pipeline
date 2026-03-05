@@ -14,6 +14,7 @@ import (
 	"github.com/aksbuzz/obs-pipeline/services/ingestor/internal/metrics"
 	"github.com/aksbuzz/obs-pipeline/services/ingestor/internal/validator"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
@@ -38,7 +39,7 @@ func main() {
 	}
 
 	// Prometheus metrics
-	m := metrics.New()
+	m := metrics.New(prometheus.DefaultRegisterer)
 
 	// HTTP server
 	r := gin.New()

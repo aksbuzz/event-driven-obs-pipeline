@@ -10,8 +10,10 @@ type Metrics struct {
 	MessagesProcessed prometheus.Counter
 	ConsumerErrors    prometheus.Counter
 	DLQRouted         prometheus.Counter
+	DLQPublishErrors  prometheus.Counter
 	ProcessingLatency prometheus.Histogram
 	ConsumerLag       prometheus.Gauge
+	StepErrors        *prometheus.CounterVec
 }
 
 func New() *Metrics {
@@ -32,6 +34,10 @@ func New() *Metrics {
 			Name: "enricher_dlq_routed_total",
 			Help: "Messages routed to DLQ due to processing failure",
 		}),
+		DLQPublishErrors: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "enricher_dlq_publish_errors_total",
+			Help: "Messages that could not be published to the DLQ (offset not committed — will be retried)",
+		}),
 		ProcessingLatency: promauto.NewHistogram(prometheus.HistogramOpts{
 			Name:    "enricher_processing_latency_seconds",
 			Help:    "Time from message read to DB write + Kafka publish",
@@ -39,7 +45,11 @@ func New() *Metrics {
 		}),
 		ConsumerLag: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "enricher_consumer_lag_messages",
-			Help: "Current consumer group lag — key backpressure signal",
+			Help: "Current consumer group lag (sum across all assigned partitions)",
 		}),
+		StepErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "enricher_step_errors_total",
+			Help: "Enrichment step failures labelled by step name",
+		}, []string{"step"}),
 	}
 }

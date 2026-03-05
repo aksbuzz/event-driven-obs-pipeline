@@ -10,6 +10,7 @@ import (
 	"net"
 
 	"github.com/oschwald/geoip2-golang"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
@@ -23,11 +24,12 @@ type Step interface {
 // Pipeline runs a slice of Steps in order. A step failure is logged but does
 // not abort the pipeline — partial enrichment is better than no enrichment.
 type Pipeline struct {
-	steps []Step
+	steps      []Step
+	stepErrors *prometheus.CounterVec
 }
 
-func NewPipeline(steps ...Step) *Pipeline {
-	return &Pipeline{steps: steps}
+func NewPipeline(stepErrors *prometheus.CounterVec, steps ...Step) *Pipeline {
+	return &Pipeline{steps: steps, stepErrors: stepErrors}
 }
 
 func (p *Pipeline) Run(ctx context.Context, event map[string]any) map[string]any {
@@ -36,6 +38,9 @@ func (p *Pipeline) Run(ctx context.Context, event map[string]any) map[string]any
 	}
 	for _, step := range p.steps {
 		if err := step.Enrich(ctx, event); err != nil {
+			if p.stepErrors != nil {
+				p.stepErrors.WithLabelValues(step.Name()).Inc()
+			}
 			// non-fatal: log and continue
 			enrichment := event["enrichment"].(map[string]any)
 			enrichment[step.Name()+"Error"] = err.Error()
@@ -63,7 +68,11 @@ func NewGeoIPEnricher(dbPath string, logger *zap.Logger) *GeoIPEnricher {
 
 func (g *GeoIPEnricher) Name() string { return "geoIp" }
 
-func (g *GeoIPEnricher) Enrich(_ context.Context, event map[string]any) error {
+func (g *GeoIPEnricher) Enrich(ctx context.Context, event map[string]any) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	if g.db == nil {
 		return nil // gracefully disabled
 	}
@@ -145,7 +154,11 @@ func NewServiceMetaEnricher(registryPath string, logger *zap.Logger) *ServiceMet
 
 func (s *ServiceMetaEnricher) Name() string { return "serviceMeta" }
 
-func (s *ServiceMetaEnricher) Enrich(_ context.Context, event map[string]any) error {
+func (s *ServiceMetaEnricher) Enrich(ctx context.Context, event map[string]any) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	if s.registry.Services == nil {
 		return nil
 	}

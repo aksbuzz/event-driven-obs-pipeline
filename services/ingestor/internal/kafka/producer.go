@@ -3,6 +3,7 @@ package kafka
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -12,6 +13,7 @@ import (
 type Producer struct {
 	p      *kafka.Producer
 	logger *zap.Logger
+	wg     sync.WaitGroup
 }
 
 func NewProducer(brokers string, logger *zap.Logger) (*Producer, error) {
@@ -32,8 +34,12 @@ func NewProducer(brokers string, logger *zap.Logger) (*Producer, error) {
 
 	prod := &Producer{p: p, logger: logger}
 
-	// Async delivery report handler — logs failures, doesn't block callers
-	go prod.handleDeliveryReports()
+	// Async delivery report handler — exits when Events() channel is closed by p.Close()
+	prod.wg.Add(1)
+	go func() {
+		defer prod.wg.Done()
+		prod.handleDeliveryReports()
+	}()
 
 	return prod, nil
 }
@@ -81,7 +87,10 @@ func (p *Producer) Close() {
 		p.logger.Warn("kafka flush: messages not delivered on shutdown",
 			zap.Int("remaining", remaining))
 	}
+	// Close the producer — this closes the Events() channel, unblocking handleDeliveryReports
 	p.p.Close()
+	// Wait for the delivery report goroutine to fully drain and exit
+	p.wg.Wait()
 }
 
 func (p *Producer) handleDeliveryReports() {

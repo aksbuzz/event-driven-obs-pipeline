@@ -110,6 +110,39 @@ services:
       - obs-network
     restart: unless-stopped
 
+  detector:
+    build:
+      context: ./services/detector
+      dockerfile: Dockerfile
+    ports:
+      - "9091:9091"   # Prometheus metrics
+    environment:
+      KAFKA_BROKERS: "kafka:29092"
+      KAFKA_GROUP_ID: "detector-v1"
+      TOPIC_ENRICHED: "events.enriched"
+      TOPIC_ALERTS: "events.alerts"
+      DATABASE_URL: "postgres://obs_user:obs_password@timescaledb:5432/obs_pipeline"
+      REDIS_URL: "redis://redis:6379"
+      WEBHOOK_URL: ""
+      WINDOW_SECONDS: "60"
+      ERROR_RATE_THRESHOLD: "0.10"
+      ERROR_RATE_MIN_EVENTS: "10"
+      ZSCORE_THRESHOLD: "3.0"
+      ZSCORE_MIN_WINDOWS: "5"
+      ZSCORE_BASELINE_SIZE: "10"
+      ALERT_COOLDOWN_MINUTES: "5"
+      METRICS_PORT: "9091"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - obs-network
+    restart: unless-stopped
+
 networks:
   obs-network:
     driver: bridge
