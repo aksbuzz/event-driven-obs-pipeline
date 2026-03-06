@@ -41,7 +41,7 @@ def compute_window_stats(
   """
   total = len(events)
   errors = sum(1 for e in events if e.get("level") in ERROR_LEVELS)
-  
+
   durations = [
     float(e["payload"]["durationMs"]) for e in events if e.get("payload", {}).get("durationMs") is not None
   ]
@@ -70,13 +70,13 @@ def check_error_rate(
   """
   if stats.total_events < min_events:
     return None
-  
+
   rate = stats.error_events / stats.total_events
   if rate <= threshold:
     return None
-  
+
   severity = "critical" if rate > 0.25 else "warning"
-  
+
   return Alert(
     alert_id=str(uuid.uuid4()),
     service=stats.service,
@@ -105,25 +105,25 @@ def check_duration_spike(
   """
   if len(baseline) < min_windows:
     return None
-  
+
   if not stats.duration_values:
     return None
-  
+
   if len(baseline) < max(min_windows, 2):
     return None
-  
+
   current_mean = mean(stats.duration_values)
   baseline_mean = mean(baseline)
   baseline_std = stdev(baseline)
   if baseline_std == 0:
     return None
-  
+
   z = (current_mean - baseline_mean) / baseline_std
   if z <= zscore_threshold:
     return None
-  
+
   severity = "critical" if z > 5.0 else "warning"
-  
+
   return Alert(
     alert_id=str(uuid.uuid4()),
     service=stats.service,

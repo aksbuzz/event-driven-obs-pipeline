@@ -5,8 +5,8 @@ import logging
 import httpx
 from confluent_kafka import Producer
 
-from metrics import Metrics
-from rules import Alert
+from src.metrics import Metrics
+from src.rules import Alert
 
 logger = logging.getLogger(__name__)
 

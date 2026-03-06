@@ -8,11 +8,11 @@ from statistics import mean
 
 from confluent_kafka import Consumer, KafkaError
 
-from config import Config
-from dispatcher import AlertDispatcher
-from metrics import Metrics
-from rules import compute_window_stats, check_error_rate, check_duration_spike
-from state import StateStore
+from src.config import Config
+from src.dispatcher import AlertDispatcher
+from src.metrics import Metrics
+from src.rules import compute_window_stats, check_error_rate, check_duration_spike
+from src.state import StateStore
 
 logger = logging.getLogger(__name__)
 

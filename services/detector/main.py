@@ -4,11 +4,11 @@ import psycopg
 from confluent_kafka import Producer
 from prometheus_client import start_http_server
 
-from config import load_config
-from consumer import DetectorConsumer
-from dispatcher import AlertDispatcher
-from metrics import Metrics
-from state import StateStore
+from src.config import load_config
+from src.consumer import DetectorConsumer
+from src.dispatcher import AlertDispatcher
+from src.metrics import Metrics
+from src.state import StateStore
 
 logging.basicConfig(
   level=logging.INFO,
