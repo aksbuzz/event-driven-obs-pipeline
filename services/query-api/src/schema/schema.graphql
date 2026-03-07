@@ -1,7 +1,7 @@
 scalar JSON
 
 type Event {
-  eventId: String!
+  eventId: ID!
   service: String!
   environment: String!
   instance: String

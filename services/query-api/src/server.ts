@@ -31,10 +31,13 @@ export async function buildServer() {
     (req as any).startTime = process.hrtime.bigint();
   });
   app.addHook('onResponse', async (req, reply) => {
-    const duration = Number(process.hrtime.bigint() - (req as any).startTime) / 1e9;
+    const startTime = (req as any).startTime;
+    if (startTime == null) return;
+    const duration = Number(process.hrtime.bigint() - startTime) / 1e9;
     const path = req.routeOptions?.url || req.url;
-    httpRequestsTotal.inc({ method: req.method, path, status: String(reply.statusCode) });
-    httpDurationSeconds.observe({ method: req.method, path }, duration);
+    const status = String(reply.statusCode);
+    httpRequestsTotal.inc({ method: req.method, path, status });
+    httpDurationSeconds.observe({ method: req.method, path, status }, duration);
   });
   app.addHook('onClose', async () => {
     app.log.info('Server shutting down');
@@ -47,7 +50,7 @@ export async function buildServer() {
     schema,
     resolvers,
     subscription: true,
-    graphiql: true,
+    graphiql: process.env.NODE_ENV !== 'production',
   });
 
   return app;

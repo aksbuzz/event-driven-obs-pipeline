@@ -3,15 +3,20 @@
  *
  * EVENT_RECEIVED - global (subscriptions with no service filter)
  * EVENT_RECEIVED:{service} - service-scoped
+ *
+ * Returns a teardown function that disconnects the consumer gracefully.
  */
 
 import { Kafka, logLevel } from 'kafkajs';
 import { PubSub } from 'mercurius';
 import type { Config } from '../config';
-import { kafkaMessagesReceived } from '../metrics';
+import { kafkaMessagesReceived, kafkaMessagesMalformed } from '../metrics';
 import type { GqlEvent } from '../repositories/event.repository';
 
-export async function startEventStream(config: Config, pubsub: PubSub): Promise<void> {
+export async function startEventStream(
+  config: Config,
+  pubsub: PubSub,
+): Promise<() => Promise<void>> {
   const kafka = new Kafka({
     clientId: 'query-api',
     brokers: config.kafkaBrokers.split(','),
@@ -19,6 +24,12 @@ export async function startEventStream(config: Config, pubsub: PubSub): Promise<
   });
 
   const consumer = kafka.consumer({ groupId: config.kafkaGroupId });
+
+  consumer.on(consumer.events.CRASH, ({ payload }) => {
+    console.error('Kafka consumer crashed:', payload.error);
+    process.exit(1);
+  });
+
   await consumer.connect();
   await consumer.subscribe({ topic: config.topicEnriched, fromBeginning: false });
 
@@ -44,6 +55,7 @@ export async function startEventStream(config: Config, pubsub: PubSub): Promise<
           ingestedAt: raw.enrichment?.enrichedAt ?? new Date().toISOString(),
         };
       } catch {
+        kafkaMessagesMalformed.inc();
         return; // malformed message - skip
       }
 
@@ -60,4 +72,6 @@ export async function startEventStream(config: Config, pubsub: PubSub): Promise<
       }
     },
   });
+
+  return () => consumer.disconnect();
 }

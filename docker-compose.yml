@@ -163,6 +163,7 @@ services:
         condition: service_healthy
     networks:
       - obs-network
+    restart: unless-stopped
 
 networks:
   obs-network:
