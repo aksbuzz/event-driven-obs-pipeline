@@ -94,19 +94,19 @@ class DetectorConsumer:
 
   def _evaluate(self) -> None:
     """
-    1. Grabs the lock, makes snapshot copy of all buffers, clear them atomically
+    1. Grabs the lock, makes snapshot copy of all buffers
     2. For each service in snapshot:
       - Computes `window_start` as earliest event timestamp
       - Calls `compute_window_stats` to get summary
       - Runs `check_error_rate` -> if alert and not cooling down -> dispatch + set cooldown
       - Reads baseline from Redis -> runs `check_duration_spike` -> dispatch pattern
       - Update baseline in Redis with this window's mean duration
+    3. Clear buffer after successful evaluation
     """
     window_end = datetime.now(timezone.utc)
 
     with self._lock:
       snapshot = {k: list(v) for k, v in self._buffers.items()}
-      self._buffers.clear()
 
     for service, events in snapshot.items():
       if not events:
@@ -154,3 +154,6 @@ class DetectorConsumer:
       # update baseline for next window
       if stats.duration_values:
         self._state.update_baseline(service, mean(stats.duration_values))
+
+    # clear buffer after full evaluation
+    self._buffers.clear()

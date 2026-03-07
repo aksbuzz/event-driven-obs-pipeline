@@ -8,14 +8,14 @@ import { subscriptionResolvers } from './resolvers/subscription.resolver';
 import { IAlertService } from './services/alert.service';
 import { IEventService } from './services/event.service';
 import { IStatsService } from './services/stats.service';
-import { TYPES } from './types';
+import { PubSubEmitter, TYPES } from './types';
 import fastifyWebsocket from '@fastify/websocket';
 import mercurius from 'mercurius';
 
 const schemaPath = join(__dirname, 'schema', 'schema.graphql');
 const schema = readFileSync(schemaPath, 'utf-8');
 
-export async function buildServer() {
+export async function buildServer(pubsubEmitter?: PubSubEmitter) {
   const app = Fastify({ logger: true });
 
   const resolvers = {
@@ -49,7 +49,7 @@ export async function buildServer() {
   await app.register(mercurius, {
     schema,
     resolvers,
-    subscription: true,
+    subscription: pubsubEmitter ? { emitter: pubsubEmitter } : true,
     graphiql: process.env.NODE_ENV !== 'production',
   });
 

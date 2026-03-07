@@ -26,8 +26,16 @@ export async function startEventStream(
   const consumer = kafka.consumer({ groupId: config.kafkaGroupId });
 
   consumer.on(consumer.events.CRASH, ({ payload }) => {
-    console.error('Kafka consumer crashed:', payload.error);
-    process.exit(1);
+    console.error('Kafka consumer crashed, will reconnct:', payload.error);
+    setTimeout(async () => {
+      try {
+        await consumer.connect();
+        await consumer.subscribe({ topic: config.topicEnriched, fromBeginning: false });
+      } catch (err) {
+        console.error('Kafka reconnect failed:', err);
+        process.exit(1);
+      }
+    }, 5_000);
   });
 
   await consumer.connect();

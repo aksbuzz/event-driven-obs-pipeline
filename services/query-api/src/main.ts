@@ -1,5 +1,6 @@
 import { FastifyBaseLogger } from 'fastify';
 import { createServer } from 'http';
+import MQEmitterRedis from 'mqemitter-redis';
 import { loadConfig } from './config';
 import { registerBindings } from './container';
 import { createPool } from './db';
@@ -45,7 +46,15 @@ async function main() {
 
   registerBindings(pool);
 
-  const app = await buildServer();
+  const redisUrl = new URL(config.redisUrl)
+  const pubsubEmitter = MQEmitterRedis({
+    host: redisUrl.hostname,
+    port: Number(redisUrl.port) || 6379,
+    password: redisUrl.password || undefined,
+    db: Number(redisUrl.pathname.slice(1)) || 0
+  })
+
+  const app = await buildServer(pubsubEmitter);
   const metricServer = startMetricsServer(config.metricsPort, app.log);
 
   const stopEventStream = await startEventStream(config, app.graphql.pubsub);
@@ -59,6 +68,7 @@ async function main() {
     await stopEventStream();
     await pool.end();
     metricServer.close();
+    await new Promise<void>((resolve) => pubsubEmitter.close(resolve))
     process.exit(0);
   };
 

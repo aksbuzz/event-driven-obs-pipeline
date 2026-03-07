@@ -159,12 +159,7 @@ func (c *Consumer) processMessage(ctx context.Context, msg *kafka.Message) error
 	}
 
 	if err := c.producer.Publish(c.cfg.TopicEnriched, partitionKey, enriched); err != nil {
-		// Non-fatal: event is in DB, downstream will be delayed but not lost.
-		eventID, _ := enriched["eventId"].(string)
-		c.logger.Warn("failed to publish enriched event to Kafka",
-			zap.String("eventId", eventID),
-			zap.Error(err),
-		)
+		return fmt.Errorf("kafka publish enriched: %w", err)
 	}
 
 	c.m.MessagesProcessed.Inc()

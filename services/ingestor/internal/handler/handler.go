@@ -71,7 +71,13 @@ func (h *Handler) IngestEvent(c *gin.Context) {
 				zap.String("eventId", eventID),
 				zap.Error(dlqErr),
 			)
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "event could not be persisted, please retry",
+				"eventId": eventID,
+			})
+			return
 		}
+
 		c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "eventId": eventID, "warning": "routed to DLQ"})
 		return
 	}

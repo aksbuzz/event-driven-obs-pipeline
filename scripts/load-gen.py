@@ -127,8 +127,8 @@ def main():
         if len(batch) >= args.batch_size:
             send_batch(batch)
             events_sent += len(batch)
-            batch = []
             time.sleep(len(batch) / max(args.rate, 1))  # throttle to target rate
+            batch = []
 
     if batch:
         send_batch(batch)
