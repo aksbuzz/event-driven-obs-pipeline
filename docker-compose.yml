@@ -165,6 +165,18 @@ services:
       - obs-network
     restart: unless-stopped
 
+  dashboard:
+    build:
+      context: services/dashboard
+    container_name: obs-dashboard
+    ports:
+      - "3000:3000"
+    depends_on:
+      - query-api
+    networks:
+      - obs-network
+    restart: unless-stopped
+
 networks:
   obs-network:
     driver: bridge
