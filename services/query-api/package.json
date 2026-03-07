@@ -1,0 +1,32 @@
+{
+  "name": "query-api",
+  "version": "1.0.0",
+  "description": "GraphQL query API for the observability pipeline",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/main.ts",
+    "start": "node dist/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.2.0",
+    "fastify": "^5.8.1",
+    "graphql": "^16.13.1",
+    "inversify": "^7.11.0",
+    "kafkajs": "^2.2.4",
+    "mercurius": "^16.8.0",
+    "pg": "^8.20.0",
+    "prom-client": "^15.1.3",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "@types/pg": "^8.18.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

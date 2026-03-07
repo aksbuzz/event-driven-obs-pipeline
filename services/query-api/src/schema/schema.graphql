@@ -1,0 +1,69 @@
+scalar JSON
+
+type Event {
+  eventId: String!
+  service: String!
+  environment: String!
+  instance: String
+  serviceVersion: String
+  level: String!
+  category: String
+  timestamp: String!
+  payload: JSON
+  enrichment: JSON
+  ingestedAt: String!
+}
+
+type EventStats {
+  bucket: String!
+  service: String!
+  level: String!
+  eventCount: Int!
+  avgDurationMs: Float
+  maxDurationMs: Float
+}
+
+type Alert {
+  alertId: ID!
+  service: String!
+  rule: String!
+  severity: String!
+  firedAt: String!
+  details: JSON
+}
+
+input EventsFilter {
+  service: String
+  level: String
+  environment: String
+  from: String
+  to: String
+  limit: Int
+  offset: Int
+}
+
+input StatsFilter {
+  service: String
+  level: String
+  from: String!
+  to: String!
+}
+
+input AlertsFilter {
+  service: String
+  severity: String
+  rule: String
+  from: String
+  to: String
+  limit: Int
+}
+
+type Query {
+  events(filter: EventsFilter): [Event!]!
+  stats(filter: StatsFilter!): [EventStats!]!
+  alerts(filter: AlertsFilter): [Alert!]!
+}
+
+type Subscription {
+  eventReceived(service: String): Event!
+}

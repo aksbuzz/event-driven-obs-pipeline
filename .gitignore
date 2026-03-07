@@ -1,4 +1,6 @@
 .venv
-/build
-/out
+build
+out
 __pycache__
+node_modules
+dist

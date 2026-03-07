@@ -95,11 +95,10 @@ services:
       TOPIC_DLQ: "events.dlq"
       DATABASE_URL: "postgres://obs_user:obs_password@timescaledb:5432/obs_pipeline"
       SERVICE_REGISTRY_PATH: "/app/service-registry.json"
-      GEOIP_DB_PATH: "/app/GeoLite2-City.mmdb"  # optional — enricher handles missing gracefully
+      GEOIP_DB_PATH: "/app/GeoLite2-City.mmdb"
       METRICS_ADDR: ":9090"
     volumes:
       - ./libs/event-schema/service-registry.json:/app/service-registry.json:ro
-      # Uncomment if you have the GeoLite2 database:
       - ./infra/geoip/GeoLite2-City.mmdb:/app/GeoLite2-City.mmdb:ro
     depends_on:
       kafka:
@@ -142,6 +141,28 @@ services:
     networks:
       - obs-network
     restart: unless-stopped
+
+  query-api:
+    build:
+      context: services/query-api
+    container_name: obs-query-api
+    ports:
+      - "4000:4000"
+      - "4001:4001"
+    environment:
+      DATABASE_URL: "postgres://obs_user:obs_password@timescaledb:5432/obs_pipeline"
+      KAFKA_BROKERS: "kafka:29092"
+      KAFKA_GROUP_ID: "query-api-v1"
+      TOPIC_ENRICHED: "events.enriched"
+      HTTP_PORT: "4000"
+      METRICS_PORT: "4001"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - obs-network
 
 networks:
   obs-network:
