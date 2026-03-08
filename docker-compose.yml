@@ -27,6 +27,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 40s
 
   timescaledb:
     image: timescale/timescaledb:latest-pg17
@@ -118,6 +119,7 @@ services:
     build:
       context: ./services/detector
       dockerfile: Dockerfile
+    container_name: obs-detector
     ports:
       - "9091:9091"   # Prometheus metrics
     environment:
