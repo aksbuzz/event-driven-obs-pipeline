@@ -46,7 +46,7 @@ SERVICES = [
     },
 ]
 
-LEVELS = ["debug", "info", "info", "info", "warn", "error"]  # weighted
+LEVELS = ["debug", "info", "info", "info", "warn"]  # weighted; errors come from error_rate only
 
 
 def make_event(svc: dict) -> dict:
@@ -96,7 +96,7 @@ def send_batch(events: list[dict]) -> None:
             timeout=5,
         )
         data = resp.json()
-        print(f"  batch {len(events)} events → accepted={data.get('accepted', '?')} rejected={data.get('rejected', '?')}")
+        print(f"  batch {len(events)} events -> accepted={data.get('accepted', '?')} rejected={data.get('rejected', '?')}")
     except Exception as e:
         print(f"  ERROR sending batch: {e}")
 

@@ -35,8 +35,10 @@ export function buildResolvers(
 ) {
   return {
     JSON: JSONScalar,
-    ...buildEventResolvers(eventService),
-    ...buildStatsResolvers(statsService),
-    ...buildAlertResolvers(alertService),
+    Query: {
+      ...buildEventResolvers(eventService).Query,
+      ...buildStatsResolvers(statsService).Query,
+      ...buildAlertResolvers(alertService).Query,
+    },
   };
 }

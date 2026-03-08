@@ -130,8 +130,14 @@ func (t *Timescale) InsertEvent(ctx context.Context, event map[string]any) error
 	payload, _ := event["payload"].(map[string]any)
 	enrichment, _ := event["enrichment"].(map[string]any)
 
-	payloadJSON, _ := json.Marshal(payload)
-	enrichmentJSON, _ := json.Marshal(enrichment)
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+	enrichmentJSON, err := json.Marshal(enrichment)
+	if err != nil {
+		return fmt.Errorf("marshal enrichment: %w", err)
+	}
 
 	_, err = t.pool.Exec(ctx, `
 		INSERT INTO events (

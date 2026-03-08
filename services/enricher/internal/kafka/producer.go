@@ -21,7 +21,7 @@ func NewProducer(brokers string, logger *zap.Logger) (*Producer, error) {
 		"enable.idempotence": true,
 		"retries":            10,
 		"retry.backoff.ms":   100,
-		"compression.type":   "snappy",
+		"compression.type":   "gzip",
 		"linger.ms":          5,
 	})
 	if err != nil {
@@ -53,7 +53,10 @@ func (p *Producer) PublishToDLQ(topic string, originalPayload []byte, reason str
 		"failedAt":        time.Now().UTC().Format(time.RFC3339),
 		"source":          "enricher",
 	}
-	payload, _ := json.Marshal(dlq)
+	payload, err := json.Marshal(dlq)
+	if err != nil {
+		return fmt.Errorf("marshal dlq: %w", err)
+	}
 	return p.p.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
 		Value:          payload,

@@ -63,6 +63,19 @@ services:
       timeout: 3s
       retries: 10
 
+  kafka-init:
+    image: confluentinc/cp-kafka:8.2.0
+    container_name: obs-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - obs-network
+    restart: "no"
+    volumes:
+      - ./infra/kafka-init/create-topics.sh:/create-topics.sh:ro
+    entrypoint: ["bash", "/create-topics.sh"]
+
   ingestor:
     build:
       context: .
@@ -72,6 +85,7 @@ services:
       - "8080:8080"   # HTTP API
       - "8081:8081"   # Prometheus metrics (if you split it later)
     environment:
+      GIN_MODE: "release"
       HTTP_ADDR: ":8080"
       KAFKA_BROKERS: "kafka:29092"    # internal Docker network — NOT localhost:9092
       TOPIC_RAW: "events.raw"
@@ -82,6 +96,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     networks:
       - obs-network
     restart: unless-stopped
@@ -99,7 +115,7 @@ services:
       TOPIC_RAW: "events.raw"
       TOPIC_ENRICHED: "events.enriched"
       TOPIC_DLQ: "events.dlq"
-      DATABASE_URL: "postgres://obs_user:obs_password@timescaledb:5432/obs_pipeline"
+      DATABASE_URL: "postgres://obs_user:obs_password@timescaledb:5432/obs_pipeline?pool_max_conns=20&pool_min_conns=2"
       SERVICE_REGISTRY_PATH: "/app/service-registry.json"
       GEOIP_DB_PATH: "/app/GeoLite2-City.mmdb"
       METRICS_ADDR: ":9090"
@@ -109,6 +125,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       timescaledb:
         condition: service_healthy
     networks:
@@ -141,6 +159,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       timescaledb:
         condition: service_healthy
       redis:
@@ -167,6 +187,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       timescaledb:
         condition: service_healthy
       redis:

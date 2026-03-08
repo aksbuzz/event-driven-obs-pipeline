@@ -53,6 +53,12 @@ func New(
 		"max.poll.interval.ms":          cfg.MaxPollIntervalMs,
 		"session.timeout.ms":            cfg.SessionTimeoutMs,
 		"partition.assignment.strategy": "cooperative-sticky",
+		// Fetch tuning: wait for up to 500ms or 64KB before returning a batch.
+		// Reduces per-message overhead under load without adding latency at low throughput.
+		"fetch.min.bytes":    64 * 1024, // 64KB
+		"fetch.wait.max.ms":  500,
+		"fetch.max.bytes":    10 * 1024 * 1024, // 10MB
+		"queued.min.messages": 1000,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("kafka.NewConsumer: %w", err)

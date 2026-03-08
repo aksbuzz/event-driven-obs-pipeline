@@ -1,6 +1,5 @@
 import { createClient, cacheExchange, fetchExchange, subscriptionExchange } from 'urql';
 import { createClient as createWSClient } from 'graphql-ws';
-import { print } from 'graphql';
 
 const isBrowser = typeof window !== 'undefined';
 
@@ -24,17 +23,17 @@ export const urqlClient = createClient({
     ...(wsClient
       ? [
           subscriptionExchange({
-            forwardSubscription(operation) {
+            // urql v5: request.query is already a string (not a DocumentNode).
+            forwardSubscription(request) {
               return {
                 subscribe(sink) {
                   const unsubscribe = wsClient.subscribe(
                     {
-                      query: print(operation.query as any),
-                      variables: operation.variables,
+                      query: request.query ?? '',
+                      variables: request.variables,
                     },
                     sink,
                   );
-
                   return { unsubscribe };
                 },
               };

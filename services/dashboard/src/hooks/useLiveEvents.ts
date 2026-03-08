@@ -7,7 +7,10 @@ import { addToRingBuffer } from '../lib/ringBuffer';
 
 const RING_SIZE = 200;
 
-export function useLiveEvents(): LiveEvent[] {
+export function useLiveEvents(): {
+  events: LiveEvent[];
+  wsStatus: 'connecting' | 'connected' | 'error';
+} {
   const { filter } = use(FilterContext);
 
   const [result] = useSubscription(
@@ -19,5 +22,11 @@ export function useLiveEvents(): LiveEvent[] {
       addToRingBuffer(prev, response.eventReceived, RING_SIZE),
   );
 
-  return result.data ?? [];
+  const wsStatus: 'connecting' | 'connected' | 'error' = result.error
+    ? 'error'
+    : result.fetching
+      ? 'connected'
+      : 'connecting';
+
+  return { events: result.data ?? [], wsStatus };
 }

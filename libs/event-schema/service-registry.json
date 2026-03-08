@@ -1,0 +1,44 @@
+{
+  "services": {
+    "payments-api": {
+      "tier": "critical",
+      "team": "payments",
+      "owner": "payments-team@example.com",
+      "repo": "github.com/example/payments-api",
+      "language": "go",
+      "sla": "99.99%"
+    },
+    "auth-service": {
+      "tier": "critical",
+      "team": "platform",
+      "owner": "platform-team@example.com",
+      "repo": "github.com/example/auth-service",
+      "language": "go",
+      "sla": "99.99%"
+    },
+    "inventory-api": {
+      "tier": "high",
+      "team": "commerce",
+      "owner": "commerce-team@example.com",
+      "repo": "github.com/example/inventory-api",
+      "language": "go",
+      "sla": "99.9%"
+    },
+    "notifications": {
+      "tier": "medium",
+      "team": "platform",
+      "owner": "platform-team@example.com",
+      "repo": "github.com/example/notifications",
+      "language": "node",
+      "sla": "99.5%"
+    },
+    "shipping-api": {
+      "tier": "high",
+      "team": "fulfillment",
+      "owner": "fulfillment-team@example.com",
+      "repo": "github.com/example/shipping-api",
+      "language": "python",
+      "sla": "99.9%"
+    }
+  }
+}

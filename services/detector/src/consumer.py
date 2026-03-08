@@ -25,6 +25,7 @@ class DetectorConsumer:
     self._metrics = metrics
     self._buffers: dict[str, list[dict]] = defaultdict(list)
     self._lock = threading.Lock()
+    self._messages_since_tick = 0
     self._consumer = Consumer(
       {
         "bootstrap.servers": config.kafka_brokers,
@@ -63,6 +64,7 @@ class DetectorConsumer:
           continue
 
         self._metrics.messages_consumed.inc()
+        self._messages_since_tick += 1
 
         try:
           event = json.loads(msg.value())
@@ -86,7 +88,9 @@ class DetectorConsumer:
       self._evaluate()
       self._metrics.evaluation_latency.observe(time.monotonic() - start)
       self._metrics.windows_evaluated.inc()
-      self._consumer.commit(asynchronous=False)
+      if self._messages_since_tick > 0:
+        self._consumer.commit(asynchronous=False)
+        self._messages_since_tick = 0
     except Exception as exc:
       logger.error("Evaluation tick failed: %s", exc)
     finally:
