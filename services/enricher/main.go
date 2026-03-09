@@ -25,7 +25,7 @@ func main() {
 	m := metrics.New()
 
 	// Kafka producer (for enriched topic output)
-	producer, err := kafka.NewProducer(cfg.KafkaBrokers, logger)
+	producer, err := kafka.NewProducer(cfg.KafkaBrokers, "enricher-transactional", logger)
 	if err != nil {
 		logger.Fatal("failed to create producer", zap.Error(err))
 	}

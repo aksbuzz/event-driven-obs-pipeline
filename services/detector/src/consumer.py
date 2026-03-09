@@ -32,6 +32,7 @@ class DetectorConsumer:
         "group.id": config.kafka_group_id,
         "auto.offset.reset": "earliest",
         "enable.auto.commit": "false",
+        "isolation.level": "read_committed"
       }
     )
 

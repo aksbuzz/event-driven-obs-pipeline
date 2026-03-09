@@ -12,6 +12,7 @@ type Config struct {
 	GeoIPDBPath         string
 	ServiceRegistryPath string
 	MetricsAddr         string
+	BatchSize           int
 	// Consumer tuning
 	MaxPollIntervalMs int
 	SessionTimeoutMs  int
@@ -28,6 +29,7 @@ func Load() *Config {
 		GeoIPDBPath:         getEnv("GEOIP_DB_PATH", "/app/GeoLite2-City.mmdb"),
 		ServiceRegistryPath: getEnv("SERVICE_REGISTRY_PATH", "/app/service-registry.json"),
 		MetricsAddr:         getEnv("METRICS_ADDR", ":9090"),
+		BatchSize:           100,
 		MaxPollIntervalMs:   300_000,
 		SessionTimeoutMs:    10_000,
 	}

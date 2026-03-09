@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
@@ -151,6 +152,51 @@ func (t *Timescale) InsertEvent(ctx context.Context, event map[string]any) error
 	)
 
 	return err
+}
+
+func (t *Timescale) InsertBatch(ctx context.Context, events []map[string]any) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, event := range events {
+		eventID, _ := event["eventId"].(string)
+		schemaVersion, _ := event["schemaVersion"].(float64)
+		level, _ := event["level"].(string)
+		category, _ := event["category"].(string)
+		tsStr, _ := event["timestamp"].(string)
+
+		ts, err := time.Parse(time.RFC3339, tsStr)
+		if err != nil {
+			ts = time.Now().UTC()
+		}
+
+		service, environment, instance, serviceVersion := "", "", "", ""
+		if src, ok := event["source"].(map[string]any); ok {
+			service, _ = src["service"].(string)
+			environment, _ = src["environment"].(string)
+			instance, _ = src["instance"].(string)
+			serviceVersion, _ = src["version"].(string)
+		}
+
+		payload, _ := event["payload"].(map[string]any)
+		enrichment, _ := event["enrichment"].(map[string]any)
+
+		payloadJSON, _ := json.Marshal(payload)
+		enrichmentJSON, _ := json.Marshal(enrichment)
+
+		batch.Queue(`
+			INSERT INTO events (
+				event_id, schema_version, service, environment, instance, service_version,
+				level, category, timestamp, payload, enrichment
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT (event_id, timestamp) DO NOTHING
+		`, eventID, int(schemaVersion), service, environment, instance, serviceVersion,
+			level, category, ts, payloadJSON, enrichmentJSON)
+	}
+
+	return t.pool.SendBatch(ctx, batch).Close()
 }
 
 func (t *Timescale) Close() {

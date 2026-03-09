@@ -1,6 +1,8 @@
 import concurrent.futures
 import json
 import logging
+import queue
+import threading
 
 import httpx
 from confluent_kafka import Producer
@@ -39,14 +41,28 @@ class AlertDispatcher:
     self._executor = concurrent.futures.ThreadPoolExecutor(
       max_workers=2, thread_name_prefix="webhook"
     )
+    self._queue = queue.SimpleQueue() # queue to batch alerts
+    self._worker = threading.Thread(
+      target=self._dispatch_worker,
+      name="alert-dispatcher",
+      daemon=True,
+    )
+    self._worker.start()
 
   def dispatch(self, alert: Alert) -> None:
-    payload = _alert_to_dict(alert)
-    self._publish_kafka(alert, payload)
-    self._insert_postgres(alert)
-    if self._webhook_url:
-      self._post_webhook(payload)
-    self._metrics.alerts_fired.labels(rule=alert.rule, severity=alert.severity).inc()
+    self._queue.put(alert)
+
+  def _dispatch_worker(self) -> None:
+    while True:
+      alert = self._queue.get()
+      payload = _alert_to_dict(alert)
+      
+      self._publish_kafka(alert, payload)
+      self._insert_postgres(alert)
+      
+      if self._webhook_url:
+        self._post_webhook(payload)
+      self._metrics.alerts_fired.labels(rule=alert.rule, severity=alert.severity).inc()
 
   def _publish_kafka(self, alert: Alert, payload: dict) -> None:
     try:

@@ -15,13 +15,19 @@ import (
 
 // kafkaPublisher abstracts the producer dependency for testability.
 type kafkaPublisher interface {
+	Begin() error
+	Commit(ctx context.Context) error
+	Abort(ctx context.Context) error
+
 	Publish(topic, key string, value any) error
 	PublishToDLQ(topic string, payload []byte, reason string) error
+	SendOffsets(ctx context.Context, msgs []*kafka.Message, consumer *kafka.Consumer) error
 }
 
 // eventSink abstracts the database dependency for testability.
 type eventSink interface {
 	InsertEvent(ctx context.Context, event map[string]any) error
+	InsertBatch(ctx context.Context, events []map[string]any) error
 }
 
 type Consumer struct {
@@ -46,18 +52,16 @@ func New(
 		"bootstrap.servers": cfg.KafkaBrokers,
 		"group.id":          cfg.KafkaGroupID,
 		"auto.offset.reset": "earliest",
-		// Disable auto-commit — we commit only after successful DB write (or confirmed DLQ routing).
-		// This is the key to at-least-once processing. Combined with DB idempotency
-		// keys (eventId), the effective guarantee is exactly-once.
+		// Disable auto-commit — offsets are committed transactionally via SendOffsetsToTransaction.
 		"enable.auto.commit":            false,
 		"max.poll.interval.ms":          cfg.MaxPollIntervalMs,
 		"session.timeout.ms":            cfg.SessionTimeoutMs,
 		"partition.assignment.strategy": "cooperative-sticky",
 		// Fetch tuning: wait for up to 500ms or 64KB before returning a batch.
 		// Reduces per-message overhead under load without adding latency at low throughput.
-		"fetch.min.bytes":    64 * 1024, // 64KB
-		"fetch.wait.max.ms":  500,
-		"fetch.max.bytes":    10 * 1024 * 1024, // 10MB
+		"fetch.min.bytes":     64 * 1024, // 64KB
+		"fetch.wait.max.ms":   500,
+		"fetch.max.bytes":     10 * 1024 * 1024, // 10MB
 		"queued.min.messages": 1000,
 	})
 	if err != nil {
@@ -82,14 +86,17 @@ func New(
 func (c *Consumer) Run(ctx context.Context) error {
 	defer c.consumer.Close()
 
-	// Fire immediately so lag is reported on startup, then every 30s.
-	// updateConsumerLag is called from this goroutine.
 	lagTimer := time.NewTimer(0)
 	defer lagTimer.Stop()
+
+	batch := make([]*kafka.Message, 0, c.cfg.BatchSize)
 
 	for {
 		select {
 		case <-ctx.Done():
+			if len(batch) > 0 {
+				c.flushBatch(context.Background(), batch)
+			}
 			c.logger.Info("consumer context cancelled, stopping poll loop")
 			return nil
 		default:
@@ -113,64 +120,111 @@ func (c *Consumer) Run(ctx context.Context) error {
 		}
 
 		c.m.MessagesConsumed.Inc()
-		processingErr := c.processMessage(ctx, msg)
-		if processingErr != nil {
-			c.logger.Error("processing failed, routing to DLQ",
-				zap.String("topic", *msg.TopicPartition.Topic),
-				zap.Int32("partition", msg.TopicPartition.Partition),
-				zap.Error(processingErr),
-			)
-			if dlqErr := c.producer.PublishToDLQ(c.cfg.TopicDLQ, msg.Value, processingErr.Error()); dlqErr != nil {
-				// This preserves at-least-once semantics: event is neither in DB nor confirmed DLQ.
-				c.m.DLQPublishErrors.Inc()
-				c.logger.Error("DLQ publish failed — skipping offset commit to allow reprocessing",
-					zap.Int32("partition", msg.TopicPartition.Partition),
-					zap.Int64("offset", int64(msg.TopicPartition.Offset)),
-					zap.Error(dlqErr),
-				)
-				continue
-			}
-			c.m.DLQRouted.Inc()
-		}
+		batch = append(batch, msg)
 
-		// Commit offset only after successful processing or confirmed DLQ routing.
-		if _, err := c.consumer.CommitMessage(msg); err != nil {
-			c.logger.Error("offset commit failed", zap.Error(err))
+		if len(batch) >= c.cfg.BatchSize {
+			c.flushBatch(ctx, batch)
+			batch = batch[:0]
 		}
 	}
 }
 
-func (c *Consumer) processMessage(ctx context.Context, msg *kafka.Message) error {
+// enrichedItem pairs a raw Kafka message with its enriched output and partition key.
+type enrichedItem struct {
+	msg      *kafka.Message
+	enriched map[string]any
+	partKey  string
+}
+
+// flushBatch processes a full batch atomically: enriches each message, batch-inserts to DB,
+// publishes all to events.enriched, and commits one Kafka transaction covering all offsets.
+// On any unrecoverable error, the transaction is aborted and offsets are not committed —
+// messages will be reprocessed after a restart or rebalance.
+func (c *Consumer) flushBatch(ctx context.Context, batch []*kafka.Message) {
 	start := time.Now()
 
-	var event map[string]any
-	if err := json.Unmarshal(msg.Value, &event); err != nil {
-		return fmt.Errorf("unmarshal: %w", err)
+	if err := c.producer.Begin(); err != nil {
+		c.logger.Error("begin transaction failed", zap.Error(err))
+		return
 	}
 
-	// Run enrichment pipeline — step failures are non-fatal (partial enrichment preferred)
-	enriched := c.pipeline.Run(ctx, event)
+	var items []enrichedItem
 
-	// Persist to TimescaleDB — idempotent on eventId
-	if err := c.db.InsertEvent(ctx, enriched); err != nil {
-		return fmt.Errorf("db insert: %w", err)
+	for _, msg := range batch {
+		enriched, err := c.enrichMessage(ctx, msg)
+		if err != nil {
+			c.logger.Error("processing failed, routing to DLQ",
+				zap.String("topic", *msg.TopicPartition.Topic),
+				zap.Int32("partition", msg.TopicPartition.Partition),
+				zap.Error(err),
+			)
+			if dlqErr := c.producer.PublishToDLQ(c.cfg.TopicDLQ, msg.Value, err.Error()); dlqErr != nil {
+				c.producer.Abort(ctx)
+				c.m.DLQPublishErrors.Inc()
+				c.logger.Error("DLQ publish failed — aborting batch, offsets not committed",
+					zap.Int32("partition", msg.TopicPartition.Partition),
+					zap.Int64("offset", int64(msg.TopicPartition.Offset)),
+					zap.Error(dlqErr),
+				)
+				return
+			}
+			c.m.DLQRouted.Inc()
+			continue
+		}
+
+		partKey := "unknown"
+		if src, ok := enriched["source"].(map[string]any); ok {
+			if svc, ok := src["service"].(string); ok {
+				partKey = svc
+			}
+		}
+		items = append(items, enrichedItem{msg: msg, enriched: enriched, partKey: partKey})
 	}
 
-	// Partition key = service name for per-service ordering on events.enriched.
-	partitionKey := "unknown"
-	if src, ok := enriched["source"].(map[string]any); ok {
-		if svc, ok := src["service"].(string); ok {
-			partitionKey = svc
+	if len(items) > 0 {
+		enrichedMaps := make([]map[string]any, len(items))
+		for i, it := range items {
+			enrichedMaps[i] = it.enriched
+		}
+
+		if err := c.db.InsertBatch(ctx, enrichedMaps); err != nil {
+			c.producer.Abort(ctx)
+			c.logger.Error("batch db insert failed — aborting transaction", zap.Error(err))
+			return
+		}
+
+		for _, it := range items {
+			if err := c.producer.Publish(c.cfg.TopicEnriched, it.partKey, it.enriched); err != nil {
+				c.producer.Abort(ctx)
+				c.logger.Error("kafka publish failed — aborting transaction", zap.Error(err))
+				return
+			}
 		}
 	}
 
-	if err := c.producer.Publish(c.cfg.TopicEnriched, partitionKey, enriched); err != nil {
-		return fmt.Errorf("kafka publish enriched: %w", err)
+	if err := c.producer.SendOffsets(ctx, batch, c.consumer); err != nil {
+		c.producer.Abort(ctx)
+		c.logger.Error("SendOffsetsToTransaction failed", zap.Error(err))
+		return
 	}
 
-	c.m.MessagesProcessed.Inc()
+	if err := c.producer.Commit(ctx); err != nil {
+		c.logger.Error("commit transaction failed", zap.Error(err))
+		return
+	}
+
+	c.m.MessagesProcessed.Add(float64(len(items)))
 	c.m.ProcessingLatency.Observe(time.Since(start).Seconds())
-	return nil
+}
+
+// enrichMessage unmarshals a raw Kafka message and runs the enrichment pipeline.
+// It has no I/O side effects — DB and Kafka writes happen in flushBatch.
+func (c *Consumer) enrichMessage(ctx context.Context, msg *kafka.Message) (map[string]any, error) {
+	var event map[string]any
+	if err := json.Unmarshal(msg.Value, &event); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	return c.pipeline.Run(ctx, event), nil
 }
 
 // updateConsumerLag queries Kafka for committed offsets and high watermarks across all
