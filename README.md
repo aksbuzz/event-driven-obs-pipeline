@@ -97,8 +97,11 @@ python3 scripts/load-gen.py --rate 20 --duration 120
 
 ## Key Design Decisions
 
-**Why manual offset commits?**
-The enricher only commits Kafka offsets after a successful DB write. This gives at-least-once delivery. Combined with `ON CONFLICT DO NOTHING` on `eventId`, the effective guarantee is exactly-once — duplicates from reprocessing are silently dropped.
+**Why Kafka transactions in the enricher?**
+The enricher wraps each batch of 100 messages in a Kafka transaction. `SendOffsetsToTransaction` atomically binds the consumer offset advance to the enriched-event produces. Either both the enriched event and the offset commit land — or neither does. This closes the crash window in the old at-least-once approach, where a duplicate enriched event could appear on `events.enriched` after a restart. See ADR-004.
+
+**Why batch processing in the enricher?**
+Without batching, each message costs one `INSERT` round-trip to TimescaleDB and one `BeginTransaction/CommitTransaction`. Batching 100 messages reduces both to 1: `pgx.Batch` sends all 100 INSERTs in a single network round-trip, and one transaction wraps the whole batch. See ADR-004.
 
 **Why DLQ instead of blocking on bad events?**
 The ingestor returns `202 Accepted` even for invalid events, routing them to `events.dlq`. Blocking producers on validation failures would couple their availability to our schema strictness. The DLQ lets us debug without causing upstream retries.

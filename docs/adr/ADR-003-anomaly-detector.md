@@ -39,6 +39,12 @@ The 2-hour TTL on the baseline means a service that goes silent long enough has 
 
 Without a cooldown, a sustained error spike fires an alert every window. `ALERT_COOLDOWN_MINUTES` (default: 5) controls how long the same rule+service pair is suppressed after the first fire. It's stored as a Redis key with a TTL — when it expires, the next triggering window fires again.
 
-## Fire-and-forget webhook
+## Non-blocking alert dispatch
 
-Kafka is the durable record; Postgres is queryable history. The webhook is a best-effort push to Slack, PagerDuty, or similar and must never block the evaluation tick. `dispatch()` runs on the timer thread, and a synchronous 5-second timeout across multiple services per window adds up fast. The HTTP call is submitted to a `ThreadPoolExecutor` (2 workers) and returns immediately. Failures are logged as warnings; a missed webhook has no effect on the other two sinks.
+`dispatch()` previously ran Kafka publish and Postgres insert synchronously on the timer thread. With multiple services, each with a 5-second I/O timeout, a slow broker or DB could delay the next evaluation tick by tens of seconds, causing missed windows.
+
+`dispatch()` now puts the alert on a `queue.SimpleQueue` and returns immediately. A single daemon thread (`alert-dispatcher`) drains the queue and does all I/O: Kafka publish, Postgres insert, and the webhook. The timer thread is never blocked on network I/O.
+
+The queue is unbounded. If the dispatcher thread falls behind (e.g. sustained broker latency), alerts queue up in memory rather than blocking evaluation. This is acceptable: the queue depth would only grow under conditions where Kafka itself is the bottleneck.
+
+The webhook remains fire-and-forget via a `ThreadPoolExecutor` (2 workers). Failures are logged as warnings; a missed webhook has no effect on the Kafka or Postgres sinks.

@@ -25,41 +25,52 @@ Both producers key messages on **service name** (e.g., `payments-api`). This ens
 
 ## Producer settings
 
-Both the ingestor and enricher producers use:
+Both producers share:
 
 ```
 acks = all                                   # wait for all in-sync replicas before ack
 enable.idempotence = true                    # prevent duplicate records on retry
 max.in.flight.requests.per.connection = 5   # safe upper limit with idempotence
 retries = 10, retry.backoff.ms = 100
-compression.type = snappy                    # good compression ratio, low CPU cost
 linger.ms = 5, batch.size = 65536           # micro-batch to reduce produce requests
 ```
 
-`acks=all` + idempotence is the combination that prevents both data loss and duplicates at the producer level. Snappy compression is a good fit for JSON payloads — they compress 3-4x with negligible CPU overhead. The 5ms linger is there because the ingestor accepts batch HTTP requests of up to 500 events; without batching, those would all hit Kafka as individual produce requests.
+The ingestor uses `compression.type = snappy` (low CPU, good ratio for JSON). The enricher uses `compression.type = gzip` because its output on `events.enriched` is consumed by the detector, which uses librdkafka (supports gzip). The enricher also sets `transactional.id = enricher-transactional` to enable the Kafka transactions API — see ADR-004.
+
+`acks=all` + idempotence prevents both data loss and duplicates at the producer level. The 5ms linger is there because the ingestor accepts batch HTTP requests of up to 500 events; without it, those would all hit Kafka as individual produce requests.
 
 ## Consumer settings (enricher)
 
 ```
 group.id = enricher-v1
 auto.offset.reset = earliest        # on first boot, read from the beginning
-enable.auto.commit = false          # commit only after successful DB write
+enable.auto.commit = false          # offsets committed via SendOffsetsToTransaction
 session.timeout.ms = 10000          # 10s for broker to detect a dead consumer
-max.poll.interval.ms = 300000       # 5 min max for a single DB write cycle
+max.poll.interval.ms = 300000       # 5 min max for a batch processing cycle
 partition.assignment.strategy = cooperative-sticky
 ```
 
-Manual commits are the critical one here. If auto-commit were on, Kafka would advance the offset on a timer regardless of whether the DB write succeeded. A crash between the commit and the write would silently drop events. With manual commits, we only advance the offset after TimescaleDB confirms the write — giving us at-least-once delivery.
+Offsets are committed via `SendOffsetsToTransaction`, not `CommitOffset`. This makes the offset advance atomic with the transaction commit — see ADR-004 for the full rationale. `cooperative-sticky` avoids the stop-the-world rebalance pause that the default eager strategy causes.
 
-`cooperative-sticky` avoids the stop-the-world rebalance pause that the default eager strategy causes. When a new enricher instance joins, only the partitions that need to move are briefly paused — the rest keep processing.
+## Consumer settings (detector)
+
+```
+group.id = detector-v1
+enable.auto.commit = false          # commit only after successful window evaluation
+isolation.level = read_committed    # only consume messages from committed transactions
+```
+
+`isolation.level = read_committed` is required because `events.enriched` is produced transactionally by the enricher. Without it, the detector could read messages from an aborted transaction before the broker marks them as aborted.
 
 ## Delivery guarantee
 
-At-least-once from Kafka plus idempotent DB writes effectively gives exactly-once end-to-end:
+The enricher wraps each batch of 100 messages in a single Kafka transaction:
 
-1. Read message from `events.raw`
-2. Enrich and write to TimescaleDB — `ON CONFLICT (event_id, timestamp) DO NOTHING`
-3. Publish to `events.enriched`
-4. Commit Kafka offset
+1. `BeginTransaction()`
+2. Enrich all 100 messages; route failures to DLQ
+3. `InsertBatch` to TimescaleDB — `ON CONFLICT (event_id, timestamp) DO NOTHING`
+4. Publish all enriched events to `events.enriched`
+5. `SendOffsetsToTransaction` — atomically bind consumer offset advance to the transaction
+6. `CommitTransaction()`
 
-If the enricher crashes between step 2 and step 4, the message is re-delivered. The second DB insert is a no-op due to the conflict clause. The second publish to `events.enriched` is harmless because downstream consumers key on `eventId`.
+If the enricher crashes at any step, the broker times out the transaction and aborts it. The consumer offset is not advanced. On restart, the same batch is reprocessed from scratch. The DB insert is idempotent; the produces are retried inside the new transaction. This gives true end-to-end exactly-once semantics for the enriched event stream.
