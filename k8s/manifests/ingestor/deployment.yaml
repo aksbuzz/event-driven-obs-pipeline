@@ -1,0 +1,84 @@
+# DEPLOYMENT — Ingestor (Go/Gin HTTP server)
+#
+# What is a Deployment?
+#   Manages a set of identical pods (replicas). k8s ensures the desired number
+#   of replicas is always running — if a pod crashes, it gets replaced.
+#   Use Deployment for stateless services (no stable identity, no dedicated disk).
+#
+# Key new concepts in this file:
+#   initContainers  — run to completion BEFORE the main container starts
+#   envFrom         — inject ALL keys from a ConfigMap as env vars at once
+#   imagePullPolicy — IfNotPresent: use local image, skip Docker Hub pull
+#   livenessProbe   — restarts the pod if the app gets stuck
+#   readinessProbe  — holds traffic until the app is actually ready
+#   resources       — CPU/memory requests (what k8s reserves) and limits (hard cap)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestor
+  namespace: obs-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingestor
+  template:
+    metadata:
+      labels:
+        app: ingestor
+    spec:
+      # Init containers run sequentially to completion before the main container starts.
+      # This guarantees the ingestor never starts before Kafka is accepting connections.
+      # If the init container fails, k8s retries it — the main container never runs.
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.36
+          # nc -z = "zero-I/O mode" — just checks if the TCP port is open, no data sent.
+          # Loop until it succeeds, then exit 0 so the main container can start.
+          command: ['sh', '-c', 'until nc -z obs-kafka 9092; do echo waiting for kafka; sleep 2; done']
+
+      containers:
+        - name: ingestor
+          image: obs-ingestor:latest
+          # IfNotPresent: use the locally built image, don't try to pull from Docker Hub.
+          # Without this, k8s would fail with ImagePullBackOff because obs-ingestor
+          # doesn't exist on Docker Hub.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+
+          # envFrom injects ALL keys from the ConfigMap as environment variables.
+          # Equivalent to writing 20 individual env: entries — much cleaner.
+          envFrom:
+            - configMapRef:
+                name: obs-config
+
+          # livenessProbe: if /healthz stops responding, k8s kills and restarts the pod.
+          # Catches cases where the app is alive (process running) but stuck (deadlock).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # readinessProbe: k8s only sends traffic to the pod AFTER this passes.
+          # Before it passes, the pod is excluded from the Service's endpoint list.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+          # resources.requests: what k8s reserves on the node for this pod.
+          # resources.limits: hard cap — pod is killed/throttled if it exceeds this.
+          # Set requests low (fit more pods on the node) but limits reasonable (prevent runaway).
+          resources:
+            requests:
+              cpu: 100m    # 100 millicores = 0.1 of a CPU core
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi

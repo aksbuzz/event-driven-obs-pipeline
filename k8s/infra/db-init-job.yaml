@@ -1,0 +1,125 @@
+# DB INIT JOB — runs schema migrations once, then exits
+#
+# Why a Job instead of letting the enricher run migrations on startup?
+#   1. Multiple replicas: if enricher scaled to 3 pods, all 3 would race
+#      to run CREATE TABLE at the same time (risky even with IF NOT EXISTS).
+#   2. Separation of concerns: schema setup is infrastructure work,
+#      not application startup work.
+#   3. Visibility: "kubectl get jobs" shows whether migrations ran and succeeded.
+#
+# The SQL is stored in a ConfigMap and mounted as a file — same pattern as
+# the Kafka init script. The job runs psql to execute it.
+#
+# The enricher's Migrate() is kept as an idempotent safety net for
+# non-k8s runs (local dev with docker-compose).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-init-sql
+  namespace: obs-pipeline
+data:
+  init.sql: |
+    -- Enable TimescaleDB extension (must be first)
+    CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+
+    -- Core events table, partitioned by timestamp via TimescaleDB hypertable
+    CREATE TABLE IF NOT EXISTS events (
+      event_id         TEXT        NOT NULL,
+      schema_version   INTEGER     NOT NULL DEFAULT 1,
+      service          TEXT        NOT NULL,
+      environment      TEXT        NOT NULL,
+      instance         TEXT,
+      service_version  TEXT,
+      level            TEXT        NOT NULL,
+      category         TEXT,
+      timestamp        TIMESTAMPTZ NOT NULL,
+      payload          JSONB       NOT NULL DEFAULT '{}',
+      enrichment       JSONB       NOT NULL DEFAULT '{}',
+      ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (event_id, timestamp)
+    );
+
+    -- Convert to hypertable: TimescaleDB partitions data by time into "chunks"
+    -- Each chunk = 7 days of data. Old chunks can be compressed or dropped cheaply.
+    SELECT create_hypertable('events', 'timestamp',
+      if_not_exists => TRUE,
+      chunk_time_interval => INTERVAL '7 days'
+    );
+
+    -- Indexes for the query patterns the dashboard uses
+    CREATE INDEX IF NOT EXISTS idx_events_service        ON events (service, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_level          ON events (level, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_category       ON events (category, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_payload_gin    ON events USING GIN (payload);
+    CREATE INDEX IF NOT EXISTS idx_events_enrichment_gin ON events USING GIN (enrichment);
+
+    -- Continuous aggregate: pre-computed per-minute counts by service+level.
+    -- The dashboard queries this view instead of scanning raw events — much faster.
+    CREATE MATERIALIZED VIEW IF NOT EXISTS events_per_minute
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute', timestamp) AS bucket,
+        service,
+        level,
+        COUNT(*) AS event_count,
+        AVG((payload->>'durationMs')::numeric)
+          FILTER (WHERE payload->>'durationMs' IS NOT NULL) AS avg_duration_ms,
+        MAX((payload->>'durationMs')::numeric)
+          FILTER (WHERE payload->>'durationMs' IS NOT NULL) AS max_duration_ms
+      FROM events
+      GROUP BY bucket, service, level
+      WITH NO DATA;
+
+    -- Keep the aggregate up to date automatically (runs every minute)
+    SELECT add_continuous_aggregate_policy('events_per_minute',
+      start_offset      => INTERVAL '10 minutes',
+      end_offset        => INTERVAL '1 minute',
+      schedule_interval => INTERVAL '1 minute',
+      if_not_exists     => TRUE
+    );
+
+    -- Drop raw events older than 30 days (aggregate data is kept longer)
+    SELECT add_retention_policy('events', INTERVAL '30 days', if_not_exists => TRUE);
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-init
+  namespace: obs-pipeline
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      # Init container waits for TimescaleDB port to be open before running psql.
+      # This is the same busybox nc pattern used in the app service Deployments.
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z timescaledb 5432; do
+                echo "waiting for timescaledb..."; sleep 2
+              done
+              echo "timescaledb is up"
+      containers:
+        - name: db-init
+          # timescaledb image has psql built in — no need for a separate postgres-client image
+          image: timescale/timescaledb:latest-pg17
+          command:
+            - sh
+            - -c
+            - psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /sql/init.sql
+          env:
+            - name: DATABASE_URL
+              value: "postgres://obs_user:obs_password@timescaledb:5432/obs_pipeline"
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+      volumes:
+        - name: sql
+          configMap:
+            name: db-init-sql

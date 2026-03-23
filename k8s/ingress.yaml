@@ -1,0 +1,63 @@
+# INGRESS — routes external HTTP traffic into the cluster
+#
+# What is an Ingress?
+#   An Ingress is a routing rule. It tells the Ingress Controller (nginx pod)
+#   how to forward incoming requests to Services inside the cluster.
+#
+# What is an Ingress Controller?
+#   A pod (nginx) that watches for Ingress resources and updates its proxy config.
+#   We just installed it in the "ingress-nginx" namespace.
+#   On Docker Desktop, it gets an external LoadBalancer IP of "localhost" automatically.
+#
+# How traffic flows:
+#   Browser → localhost:80 → Ingress Controller (nginx) → Service → Pod
+#
+# Routing rules in this file:
+#   /api/*   → ingestor:8080   (POST /api/v1/events etc.)
+#   /        → dashboard:3000  (catch-all: serve the React app)
+#
+# Note: /graphql is NOT here — the dashboard's nginx.conf handles it internally
+#   by proxying to query-api:4000 within the cluster. k8s DNS resolves
+#   "query-api" the same way docker-compose resolves service names.
+#
+# annotations:
+#   proxy-read-timeout / proxy-send-timeout: set to 3600s (1 hour) to support
+#   long-lived WebSocket connections used by GraphQL subscriptions.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: obs-ingress
+  namespace: obs-pipeline
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Rewrite: strip the /api prefix before forwarding to the ingestor.
+    # /api/v1/events → ingestor:8080/v1/events
+    # /api/healthz   → ingestor:8080/healthz
+    # $2 captures everything after /api (the second capture group in the path regex below).
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  # ingressClassName: which Ingress Controller handles this Ingress.
+  # "nginx" matches the IngressClass installed by the controller above.
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          # More specific paths must come FIRST — nginx matches top-to-bottom.
+          # Regex path: /api followed by an optional / and anything else.
+          # Capture group $2 = everything after /api → used by rewrite-target above.
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: ingestor
+                port:
+                  number: 8080
+          # Catch-all: everything else goes to the dashboard
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard
+                port:
+                  number: 3000

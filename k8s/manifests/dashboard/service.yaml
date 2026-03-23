@@ -1,0 +1,14 @@
+# SERVICE — ClusterIP for Dashboard
+#
+# The Ingress (Task 15) routes "/" to this service on port 3000.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: obs-pipeline
+spec:
+  selector:
+    app: dashboard
+  ports:
+    - port: 3000
+      targetPort: 3000

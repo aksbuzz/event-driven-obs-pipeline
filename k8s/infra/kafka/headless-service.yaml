@@ -1,0 +1,25 @@
+# WHY A HEADLESS SERVICE?
+#
+# StatefulSets require a "governing service" to register stable DNS for each pod.
+# A headless service (clusterIP: None) creates DNS A-records directly to pod IPs:
+#
+#   obs-kafka-0.obs-kafka-headless.obs-pipeline.svc.cluster.local → <pod IP>
+#
+# This is how Kafka (and any clustered stateful app) discovers its peers.
+# Compare with a normal Service which load-balances — here we want direct pod access.
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-kafka-headless
+  namespace: obs-pipeline
+  labels:
+    app: obs-kafka
+spec:
+  clusterIP: None  # makes it headless — no load-balancing, just DNS
+  selector:
+    app: obs-kafka
+  ports:
+    - name: broker
+      port: 9092
+    - name: controller
+      port: 29093

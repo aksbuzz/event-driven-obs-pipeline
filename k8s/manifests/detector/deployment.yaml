@@ -1,0 +1,85 @@
+# DEPLOYMENT — Detector (Python anomaly detection)
+#
+# Detector depends on 3 things: Kafka, TimescaleDB (alerts table), Redis (state).
+# Three init containers run in sequence to wait for all of them.
+# Note: "wait-for-redis" uses service name "redis" (raw Deployment),
+# not "obs-redis-master" (which was the bitnami Helm chart naming).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: detector
+  namespace: obs-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: detector
+  template:
+    metadata:
+      labels:
+        app: detector
+    spec:
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z obs-kafka 9092; do echo waiting for kafka; sleep 2; done']
+
+        - name: wait-for-schema
+          image: timescale/timescaledb:latest-pg17
+          command:
+            - sh
+            - -c
+            - |
+              until psql "$DATABASE_URL" -c "\dt events" 2>/dev/null | grep -q events; do
+                echo "waiting for DB schema..."; sleep 3
+              done
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: obs-secrets
+                  key: DATABASE_URL
+
+        - name: wait-for-redis
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z redis 6379; do echo waiting for redis; sleep 2; done']
+
+      containers:
+        - name: detector
+          image: obs-detector:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9091  # Prometheus metrics
+
+          envFrom:
+            - configMapRef:
+                name: obs-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: obs-secrets
+                  key: DATABASE_URL
+            - name: KAFKA_GROUP_ID
+              value: "detector-v1"
+            - name: WEBHOOK_URL
+              value: ""
+
+          livenessProbe:
+            tcpSocket:
+              port: 9091
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9091
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

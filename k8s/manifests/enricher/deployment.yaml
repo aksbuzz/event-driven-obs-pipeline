@@ -1,0 +1,93 @@
+# DEPLOYMENT — Enricher (Go Kafka consumer → TimescaleDB)
+#
+# New concept: secretKeyRef
+#   DATABASE_URL contains a password, so it comes from the Secret, not ConfigMap.
+#   secretKeyRef injects one specific key from a Secret as an env var.
+#
+# New concept: multiple init containers
+#   Init containers run sequentially. If any fails, the next one doesn't start.
+#   Enricher needs Kafka AND the DB schema ready before it can consume events.
+#   wait-for-kafka runs first, then wait-for-schema.
+#
+# wait-for-schema checks for the "events" TABLE, not just the port.
+#   Just because port 5432 is open doesn't mean db-init-job finished running.
+#   Polling for the table ensures migrations actually completed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: enricher
+  namespace: obs-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: enricher
+  template:
+    metadata:
+      labels:
+        app: enricher
+    spec:
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z obs-kafka 9092; do echo waiting for kafka; sleep 2; done']
+
+        - name: wait-for-schema
+          image: timescale/timescaledb:latest-pg17
+          command:
+            - sh
+            - -c
+            - |
+              until psql "$DATABASE_URL" -c "\dt events" 2>/dev/null | grep -q events; do
+                echo "waiting for DB schema..."; sleep 3
+              done
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: obs-secrets
+                  key: DATABASE_URL
+
+      containers:
+        - name: enricher
+          image: obs-enricher:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9090  # Prometheus metrics
+
+          # All non-sensitive config from ConfigMap (KAFKA_BROKERS, topics, file paths, etc.)
+          envFrom:
+            - configMapRef:
+                name: obs-config
+
+          # Sensitive config from Secret (overrides any same-named key from ConfigMap)
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: obs-secrets
+                  key: DATABASE_URL
+            - name: KAFKA_GROUP_ID
+              value: "enricher-v1"
+
+          # Enricher has no HTTP server — use tcpSocket probe on the metrics port.
+          # tcpSocket just checks the port is open; safe here because metrics server
+          # binds to localhost inside the pod, not via the Service.
+          livenessProbe:
+            tcpSocket:
+              port: 9090
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

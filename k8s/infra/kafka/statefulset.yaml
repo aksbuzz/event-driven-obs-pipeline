@@ -1,0 +1,135 @@
+# STATEFULSET vs DEPLOYMENT — the key difference:
+#
+#   Deployment: pods are interchangeable, any pod can replace any other
+#   StatefulSet: each pod has a stable identity — predictable name (obs-kafka-0),
+#               predictable DNS, and its own dedicated PersistentVolumeClaim
+#
+# Kafka needs a StatefulSet because:
+#   1. Its data (commit logs) must survive restarts → dedicated PVC per pod
+#   2. KRaft quorum voters are identified by node ID + hostname → stable identity
+#
+# spec.serviceName links this StatefulSet to the headless service for DNS.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: obs-kafka
+  namespace: obs-pipeline
+spec:
+  serviceName: obs-kafka-headless  # must match the headless service name above
+  replicas: 1
+  selector:
+    matchLabels:
+      app: obs-kafka
+  template:
+    metadata:
+      labels:
+        app: obs-kafka
+    spec:
+      containers:
+        - name: kafka
+          # Same image as docker-compose — already cached locally
+          image: confluentinc/cp-kafka:8.2.0
+          ports:
+            - containerPort: 9092   # PLAINTEXT — clients connect here
+            - containerPort: 29093  # CONTROLLER — KRaft leader election
+          env:
+            # KRaft (no ZooKeeper): this single pod is both broker and controller
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+
+            # Bind to all interfaces inside the pod on both ports
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093"
+
+            # What clients are told to connect to.
+            # "obs-kafka:9092" resolves via the ClusterIP service above.
+            # (In docker-compose this was "kafka:29092" — same concept, different port/name)
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://obs-kafka:9092"
+
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+
+            # KRaft quorum: "node 1 lives at localhost:29093"
+            #
+            # In combined mode the broker and controller run in the SAME pod,
+            # so localhost is the simplest and most reliable address — no DNS needed.
+            # Using a service name here fails because DNS may not resolve during the
+            # critical window when the JVM first starts up.
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@localhost:29093"
+
+            # Reuse the same cluster ID as docker-compose (arbitrary UUID, must be stable)
+            - name: CLUSTER_ID
+              value: "MkU3OEVBNTcwNTJENDM2Qk"
+
+            # Single-node: no replication, no ISR requirements
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "false"
+
+            # Point data directory at the mounted PVC
+            - name: KAFKA_LOG_DIRS
+              value: "/var/kafka-data"
+
+          # readinessProbe: k8s only sends traffic (via the ClusterIP service) once this passes.
+          #
+          # WHY tcpSocket instead of kafka-topics --list:
+          # kafka-topics connects, gets metadata saying "broker is at obs-kafka:9092",
+          # then reconnects to obs-kafka:9092 (the ClusterIP). But ClusterIP only routes
+          # to Ready pods — so the probe deadlocks: pod needs to be Ready to pass the
+          # probe, but the probe requires the ClusterIP to work which needs the pod to be Ready.
+          #
+          # tcpSocket just checks if port 9092 is open — no client protocol, no deadlock.
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 12
+
+          # livenessProbe: restarts the pod if Kafka's broker port goes dark entirely.
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 300m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/kafka-data
+
+  # volumeClaimTemplates: each pod gets its own PVC automatically.
+  # For 1 replica this creates: kafka-data-obs-kafka-0
+  # Scale to 3 replicas and you'd get: kafka-data-obs-kafka-0/1/2
+  # This is the key StatefulSet superpower — Deployments can't do this.
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi

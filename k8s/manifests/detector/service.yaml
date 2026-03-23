@@ -1,0 +1,13 @@
+# SERVICE — ClusterIP for Detector (metrics only)
+apiVersion: v1
+kind: Service
+metadata:
+  name: detector
+  namespace: obs-pipeline
+spec:
+  selector:
+    app: detector
+  ports:
+    - name: metrics
+      port: 9091
+      targetPort: 9091

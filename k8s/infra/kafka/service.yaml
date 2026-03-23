@@ -1,0 +1,25 @@
+# CLIENT SERVICE — stable ClusterIP address for app services
+#
+# App services (ingestor, enricher, etc.) connect to "obs-kafka:9092".
+# This service load-balances to any pod matching app=obs-kafka.
+# With one replica it's just a stable DNS alias for the pod.
+#
+# Port 29093 is also exposed so the Kafka pod can reach its own controller
+# quorum voter via "obs-kafka:29093" (it connects to itself through the service).
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-kafka
+  namespace: obs-pipeline
+  labels:
+    app: obs-kafka
+spec:
+  selector:
+    app: obs-kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+    - name: controller
+      port: 29093
+      targetPort: 29093

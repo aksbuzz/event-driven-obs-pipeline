@@ -1,0 +1,19 @@
+# SERVICE — ClusterIP for Redis
+#
+# Same pattern as TimescaleDB: single pod, no peer discovery needed,
+# so a plain ClusterIP is enough. Other pods reach Redis at "redis:6379".
+#
+# No headless service because:
+#   - We have 1 replica; there's nothing to discover
+#   - Clients just want a stable address, not per-pod DNS
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: obs-pipeline
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379

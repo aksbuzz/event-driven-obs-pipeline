@@ -1,0 +1,88 @@
+# STATEFULSET — TimescaleDB (Postgres + time-series extension)
+#
+# Why StatefulSet and not Deployment?
+#   A Deployment replaces pods freely — if the pod is replaced, a new pod
+#   gets a NEW empty PVC by default. Your data is gone.
+#   A StatefulSet guarantees pod "timescaledb-0" always reattaches to
+#   PVC "data-timescaledb-0", so data survives restarts and rescheduling.
+#
+# The readiness probe uses "pg_isready" — a built-in Postgres tool that
+# checks if the server is accepting connections. This avoids the ClusterIP
+# deadlock we hit with Kafka because pg_isready connects to localhost
+# directly, not via the service.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: timescaledb
+  namespace: obs-pipeline
+spec:
+  # No headless service needed — timescaledb is a single node.
+  # serviceName is still required by the StatefulSet spec, so we point it
+  # at the regular ClusterIP service.
+  serviceName: timescaledb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: timescaledb
+  template:
+    metadata:
+      labels:
+        app: timescaledb
+    spec:
+      containers:
+        - name: timescaledb
+          # Same image as docker-compose
+          image: timescale/timescaledb:latest-pg17
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: obs_user
+            - name: POSTGRES_PASSWORD
+              value: obs_password
+            - name: POSTGRES_DB
+              value: obs_pipeline
+            # Postgres data directory must be inside the mounted PVC.
+            # The default (/var/lib/postgresql/data) is fine — we just make it explicit.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
+          # pg_isready: built-in Postgres health check tool.
+          # Checks if the server accepts connections on localhost — no service involved,
+          # so no ClusterIP deadlock like we saw with Kafka.
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "obs_user", "-d", "obs_pipeline"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 6
+
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "obs_user", "-d", "obs_pipeline"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+
+  # Each pod gets its own dedicated PVC: "data-timescaledb-0"
+  # Docker Desktop provisions it instantly via the hostpath StorageClass.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 2Gi

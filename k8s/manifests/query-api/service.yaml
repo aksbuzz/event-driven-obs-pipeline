@@ -1,0 +1,20 @@
+# SERVICE — ClusterIP for Query-API
+#
+# Two ports: 4000 (GraphQL HTTP) and 4001 (Prometheus metrics).
+# The dashboard's nginx.conf proxies /graphql to query-api:4000 internally —
+# no Ingress rule needed for GraphQL, it goes through the dashboard pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: query-api
+  namespace: obs-pipeline
+spec:
+  selector:
+    app: query-api
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+    - name: metrics
+      port: 4001
+      targetPort: 4001

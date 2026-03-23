@@ -1,0 +1,20 @@
+# SERVICE — ClusterIP for TimescaleDB
+#
+# Unlike Kafka, TimescaleDB is a single pod with no peer discovery.
+# No headless service needed — just a plain ClusterIP so app services
+# can reach the database at "timescaledb:5432" from anywhere in the namespace.
+#
+# Compare with Kafka's two services:
+#   - Kafka needed headless (broker-to-broker DNS) + ClusterIP (client access)
+#   - TimescaleDB only needs ClusterIP (client access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb
+  namespace: obs-pipeline
+spec:
+  selector:
+    app: timescaledb
+  ports:
+    - port: 5432
+      targetPort: 5432

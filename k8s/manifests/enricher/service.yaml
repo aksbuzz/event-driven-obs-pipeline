@@ -1,0 +1,16 @@
+# SERVICE — ClusterIP for Enricher (metrics only)
+#
+# The enricher is a Kafka consumer — it doesn't serve HTTP traffic from other pods.
+# This service exists only so Prometheus can scrape metrics at enricher:9090/metrics.
+apiVersion: v1
+kind: Service
+metadata:
+  name: enricher
+  namespace: obs-pipeline
+spec:
+  selector:
+    app: enricher
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090

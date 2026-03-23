@@ -1,0 +1,58 @@
+# CONFIGMAP — shared non-sensitive configuration for all app services
+#
+# What is a ConfigMap?
+#   A k8s object that holds key-value pairs. Pods can consume them as:
+#     1. Environment variables (envFrom: configMapRef injects ALL keys at once)
+#     2. Files mounted into the container (useful for config files)
+#
+# What goes here vs a Secret?
+#   ConfigMap  = anything you'd commit to git: service addresses, topic names,
+#                file paths, tuning parameters. Not sensitive.
+#   Secret     = anything you'd put in .env and gitignore: passwords, API keys,
+#                connection strings with credentials.
+#
+# Why a shared ConfigMap instead of hardcoding in each Deployment?
+#   If obs-kafka moves to a different address, you update ONE place here
+#   instead of hunting through 4 Deployment files. Same principle as
+#   environment variables in docker-compose.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: obs-config
+  namespace: obs-pipeline
+data:
+  # ── Kafka ──────────────────────────────────────────────────────────────────
+  # "obs-kafka" is the ClusterIP service name (k8s/infra/kafka/service.yaml).
+  # Port 9092 is the PLAINTEXT broker listener.
+  KAFKA_BROKERS: "obs-kafka:9092"
+  TOPIC_RAW:      "events.raw"
+  TOPIC_ENRICHED: "events.enriched"
+  TOPIC_DLQ:      "events.dlq"
+  TOPIC_ALERTS:   "events.alerts"
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  # "redis" is the ClusterIP service name (k8s/infra/redis/service.yaml).
+  # Note: the plan originally used "obs-redis-master" (bitnami Helm naming)
+  # but we deployed raw Redis whose service is simply "redis".
+  REDIS_URL: "redis://redis:6379"
+
+  # ── App server settings ────────────────────────────────────────────────────
+  GIN_MODE:     "release"
+  HTTP_ADDR:    ":8080"
+  METRICS_ADDR: ":9090"
+  METRICS_PORT: "9091"
+  HTTP_PORT:    "4000"
+
+  # ── File paths (must match where Dockerfiles COPY the files) ──────────────
+  SCHEMA_PATH:           "/app/schema.json"
+  GEOIP_DB_PATH:         "/app/GeoLite2-City.mmdb"
+  SERVICE_REGISTRY_PATH: "/app/service-registry.json"
+
+  # ── Detector tuning (all have sensible defaults in config.py) ─────────────
+  WINDOW_SECONDS:         "60"
+  ERROR_RATE_THRESHOLD:   "0.10"
+  ERROR_RATE_MIN_EVENTS:  "10"
+  ZSCORE_THRESHOLD:       "3.0"
+  ZSCORE_MIN_WINDOWS:     "5"
+  ZSCORE_BASELINE_SIZE:   "10"
+  ALERT_COOLDOWN_MINUTES: "5"

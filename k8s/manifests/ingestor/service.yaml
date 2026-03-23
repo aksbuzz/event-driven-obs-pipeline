@@ -1,0 +1,18 @@
+# SERVICE — ClusterIP for Ingestor
+#
+# Gives the ingestor a stable DNS name "ingestor" inside the cluster.
+# The Ingress (Task 15) will route external traffic here.
+#
+# Port 8080 on the Service maps to port 8080 on the pod (containerPort).
+# Other pods that want to call the ingestor use: http://ingestor:8080
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingestor
+  namespace: obs-pipeline
+spec:
+  selector:
+    app: ingestor
+  ports:
+    - port: 8080
+      targetPort: 8080

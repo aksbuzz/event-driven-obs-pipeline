@@ -1,0 +1,72 @@
+# DEPLOYMENT — Redis (in-memory key-value store)
+#
+# Why Deployment and NOT StatefulSet?
+#   Redis data in this project is ephemeral — it stores rate-limit counters and
+#   sliding-window state for the detector. If the pod restarts, those counters
+#   reset harmlessly; the detector will rebuild them from incoming events.
+#
+#   StatefulSet is only worth the extra complexity when you need:
+#     - A stable pod name (obs-kafka-0, timescaledb-0) for peer discovery
+#     - A dedicated PVC that survives pod replacement
+#   Neither applies here, so we use the simpler Deployment.
+#
+#   Compare the three infra pieces:
+#     Kafka:       StatefulSet  — needs stable name for KRaft quorum voters
+#     TimescaleDB: StatefulSet  — needs dedicated PVC so data survives restarts
+#     Redis:       Deployment   — ephemeral counters, no PVC, no peer discovery
+#
+# Redis config flags:
+#   --protected-mode no  — disable the "bind to 127.0.0.1" safety net that
+#                          blocks connections from other pods. In a Namespace
+#                          we rely on k8s NetworkPolicy (or just trust that
+#                          other pods in the same namespace are ours).
+#   --appendonly yes     — persist writes to an AOF log. Survives Redis process
+#                          restarts within the same pod. NOT a full durability
+#                          guarantee (PVC would be needed for that), but protects
+#                          against Redis crashes without sacrificing Deployment simplicity.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: obs-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          # Same image as docker-compose — tiny Alpine-based official image
+          image: redis:8.0-alpine
+          ports:
+            - containerPort: 6379
+          command: ["redis-server", "--protected-mode", "no", "--appendonly", "yes"]
+
+          # redis-cli ping returns "+PONG\r\n" when the server is ready.
+          # Safe to use exec here — redis-cli connects to localhost, not via the Service.
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

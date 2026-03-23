@@ -1,0 +1,82 @@
+# CONFIGMAP — stores a file (not just env vars)
+#
+# ConfigMaps can hold arbitrary text files, not just key=value pairs.
+# Here we store the topic-creation shell script so the Job can mount
+# and execute it without baking it into a custom Docker image.
+#
+# The script is the same logic as infra/kafka-init/create-topics.sh,
+# adapted for k8s: bootstrap server is "obs-kafka:9092" (the ClusterIP
+# service) instead of "kafka:29092" (docker-compose service name).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-init-script
+  namespace: obs-pipeline
+data:
+  create-topics.sh: |
+    #!/bin/bash
+    set -e
+    BOOTSTRAP="obs-kafka:9092"
+
+    echo "Waiting for Kafka broker at $BOOTSTRAP..."
+    # Loop until kafka-topics can list (even empty list = broker ready)
+    until kafka-topics --bootstrap-server "$BOOTSTRAP" --list > /dev/null 2>&1; do
+      echo "  not ready yet, retrying in 3s..."
+      sleep 3
+    done
+    echo "Kafka ready."
+
+    create_topic() {
+      kafka-topics --bootstrap-server "$BOOTSTRAP" \
+        --create --if-not-exists \
+        --topic "$1" \
+        --partitions "$2" \
+        --replication-factor 1 \
+        --config retention.ms="$3" \
+        --config cleanup.policy=delete
+      echo "  created: $1"
+    }
+
+    create_topic "events.raw"       3   604800000   # 7 days
+    create_topic "events.enriched"  3   604800000   # 7 days
+    create_topic "events.dlq"       1   2592000000  # 30 days
+    create_topic "events.alerts"    1   86400000    # 1 day
+
+    echo ""
+    echo "All topics created:"
+    kafka-topics --bootstrap-server "$BOOTSTRAP" --list
+---
+# JOB — runs a pod once to completion, then stops.
+#
+# Jobs are the k8s equivalent of docker-compose "restart: no".
+# Key fields:
+#   restartPolicy: OnFailure  — retry if the script exits non-zero, but don't
+#                               restart if it succeeds
+#   ttlSecondsAfterFinished   — auto-delete the completed Job pod after 5 min
+#                               (keeps "kubectl get pods" clean)
+#
+# The script is mounted from the ConfigMap above as a read-only file.
+# defaultMode: 0755 makes it executable inside the container.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  namespace: obs-pipeline
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-init
+          # Same image as the Kafka StatefulSet — has kafka-topics in PATH
+          image: confluentinc/cp-kafka:8.2.0
+          command: ["bash", "/scripts/create-topics.sh"]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: kafka-init-script
+            defaultMode: 0755  # makes the script executable

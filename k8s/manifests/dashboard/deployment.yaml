@@ -1,0 +1,50 @@
+# DEPLOYMENT — Dashboard (React + nginx)
+#
+# Simplest Deployment: no init containers, no env vars, no secrets.
+# The dashboard is a pre-built static site served by nginx.
+# nginx.conf (baked into the image) proxies /graphql → query-api:4000 internally.
+#
+# k8s DNS works the same as docker-compose service names:
+#   "query-api" resolves to the query-api ClusterIP service within the namespace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: obs-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: obs-dashboard:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
