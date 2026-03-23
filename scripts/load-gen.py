@@ -20,7 +20,7 @@ from faker import Faker
 
 fake = Faker()
 
-INGESTOR_URL = "http://localhost:8080"
+INGESTOR_URL = "http://localhost/api"  # k8s Ingress — change to http://localhost:8080 for docker-compose
 
 SERVICES = [
     {

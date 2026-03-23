@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=builder /app/enricher .
+COPY libs/event-schema/service-registry.json ./service-registry.json
+COPY infra/geoip/GeoLite2-City.mmdb ./GeoLite2-City.mmdb
 
 EXPOSE 9090
 ENTRYPOINT ["./enricher"]

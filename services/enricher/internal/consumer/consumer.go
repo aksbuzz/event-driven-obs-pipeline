@@ -89,6 +89,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 	lagTimer := time.NewTimer(0)
 	defer lagTimer.Stop()
 
+	// flushTicker fires every 5s. On each poll timeout we check it — if it has fired
+	// and there are buffered events, we flush the partial batch rather than waiting
+	// for it to reach BatchSize. This caps write latency at ~5.5s even at low throughput.
+	flushTicker := time.NewTicker(5 * time.Second)
+	defer flushTicker.Stop()
+
 	batch := make([]*kafka.Message, 0, c.cfg.BatchSize)
 
 	for {
@@ -112,6 +118,17 @@ func (c *Consumer) Run(ctx context.Context) error {
 		msg, err := c.consumer.ReadMessage(500 * time.Millisecond)
 		if err != nil {
 			if kafkaErr, ok := err.(kafka.Error); ok && kafkaErr.Code() == kafka.ErrTimedOut {
+				// Time-based flush: if the ticker has fired and we have a partial batch,
+				// flush now rather than waiting for it to reach BatchSize.
+				if len(batch) > 0 {
+					select {
+					case <-flushTicker.C:
+						c.logger.Info("flushing partial batch on idle timeout", zap.Int("size", len(batch)))
+						c.flushBatch(ctx, batch)
+						batch = batch[:0]
+					default:
+					}
+				}
 				continue // normal — no messages in poll window
 			}
 			c.logger.Error("consumer read error", zap.Error(err))
