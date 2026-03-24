@@ -1,0 +1,5 @@
+# NAMESPACE — an isolated workspace for all obs-pipeline resources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: obs-pipeline
+description: Application tier — five services + RBAC + NetworkPolicy + HPA + Ingress
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

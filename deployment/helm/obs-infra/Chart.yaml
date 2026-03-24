@@ -1,0 +1,25 @@
+# CHART.YAML — Helm chart metadata
+#
+# What is a Helm chart?
+#   A chart is a package of Kubernetes resources. Like npm for Node or pip for Python,
+#   Helm lets you install, upgrade, and uninstall a whole set of K8s resources as a unit.
+#
+# This chart (obs-infra) manages the stateful infrastructure tier:
+#   - Kafka (event streaming)
+#   - TimescaleDB (time-series database)
+#   - Redis (in-memory state for the detector)
+#
+# Two-chart split rationale:
+#   Infra (this chart) vs App (obs-pipeline chart) have different release lifecycles.
+#   You don't redeploy Kafka when you ship a new version of the ingestor.
+#   Separating them means: helm upgrade obs-pipeline never touches Kafka.
+#
+# apiVersion: v2 — Helm 3+ chart format. v1 was Helm 2 (no longer supported).
+# version: chart version (bump this when chart structure changes).
+# appVersion: the version of the software this chart deploys (informational only).
+apiVersion: v2
+name: obs-infra
+description: Infrastructure tier — Kafka (event streaming), TimescaleDB (time-series DB), Redis (in-memory state)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

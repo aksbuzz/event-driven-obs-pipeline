@@ -1,0 +1,17 @@
+# Default-deny: block ALL ingress and egress for every pod in the namespace.
+# This is the correct security baseline — then we punch specific holes below.
+#
+# podSelector: {} means "select ALL pods" (empty selector = match everything).
+# No ingress/egress rules = allow nothing.
+#
+# Without this, K8s allows all traffic between pods by default.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

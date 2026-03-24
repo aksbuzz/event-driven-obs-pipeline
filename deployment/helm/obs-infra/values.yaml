@@ -1,0 +1,37 @@
+# VALUES.YAML — the single source of truth for all tunables in this chart.
+#
+# What is values.yaml?
+#   Every template in templates/ uses {{ .Values.xxx }} to reference values here.
+#   This separates "what to deploy" (templates) from "how to configure it" (values).
+#
+# How to override values:
+#   helm install obs-infra . --set kafka.storage=5Gi        # one-off override
+#   helm install obs-infra . -f production-values.yaml      # full override file
+#
+# This means the same chart (templates) works in dev/staging/prod — only values differ.
+# dev: storage=1Gi, prod: storage=50Gi. Templates never change.
+
+# ── Target namespace ────────────────────────────────────────────────────────
+# All resources created by this chart will land in this namespace.
+# Changing this value moves the entire infra tier to a different namespace.
+namespace: obs-pipeline
+
+# ── Kafka ────────────────────────────────────────────────────────────────────
+# image: use the same version as docker-compose to avoid surprises.
+# storage: PersistentVolumeClaim size for Kafka commit logs.
+#   On Docker Desktop this is provisioned from local disk via the "hostpath" StorageClass.
+#   On EKS/AKS this would provision an EBS/Azure Disk automatically.
+kafka:
+  image: confluentinc/cp-kafka:8.2.0
+  storage: 1Gi
+
+# ── TimescaleDB ───────────────────────────────────────────────────────────────
+timescaledb:
+  image: timescale/timescaledb:latest-pg17
+  storage: 2Gi
+
+# ── Redis ─────────────────────────────────────────────────────────────────────
+# No storage: Redis stores ephemeral detector counters. A pod restart resets them
+# harmlessly — the detector rebuilds state from incoming Kafka events.
+redis:
+  image: redis:8.0-alpine

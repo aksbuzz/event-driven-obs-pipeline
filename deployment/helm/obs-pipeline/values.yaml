@@ -1,0 +1,81 @@
+namespace: obs-pipeline
+
+image:
+  # registry: "" means use local images (Docker Desktop, imagePullPolicy: IfNotPresent)
+  # Set to "myregistry.io/myorg" for a real registry
+  registry: ""
+  tag: latest
+  pullPolicy: IfNotPresent
+
+db:
+  url: "postgres://obs_user:obs_password@timescaledb:5432/obs_pipeline"
+  password: "obs_password"
+
+ingestor:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+
+enricher:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+detector:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+queryApi:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+dashboard:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+
+# ── Init container images ─────────────────────────────────────────────────────
+# wait-for-schema runs psql to poll until the DB schema is ready.
+# It uses the timescaledb image (which bundles psql) so no extra image is needed.
+# Centralising it here means one place to update if the DB version changes,
+# instead of hunting through enricher/detector/query-api deployment templates.
+initImages:
+  waitForSchema: timescale/timescaledb:latest-pg17
+
+hpa:
+  enabled: true
+  ingestor:
+    minReplicas: 1
+    maxReplicas: 3
+    cpuTarget: 70
+  enricher:
+    minReplicas: 1
+    maxReplicas: 3
+    cpuTarget: 70

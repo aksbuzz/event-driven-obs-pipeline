@@ -1,0 +1,188 @@
+# ── DNS egress (required for ALL pods) ───────────────────────────────────────
+# Pods resolve service names (e.g., "obs-kafka") via kube-dns on port 53.
+# Without this, DNS lookups fail and every service connection breaks.
+# Applied to each app pod individually.
+{{- range list "ingestor" "enricher" "detector" "query-api" "dashboard" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-{{ . }}
+  namespace: {{ $.Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ . }}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}
+---
+# ── ingestor ─────────────────────────────────────────────────────────────────
+# Accepts HTTP on 8080 (from Ingress controller).
+# Sends events to Kafka on 9092.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingestor
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: ingestor
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8080
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: obs-kafka
+      ports:
+        - port: 9092
+---
+# ── enricher ─────────────────────────────────────────────────────────────────
+# No ingress (Kafka consumer — it pulls, nothing pushes to it).
+# Egress: Kafka (consume raw events) + TimescaleDB (write enriched events).
+# Also needs egress to TimescaleDB and Kafka from init containers.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-enricher
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: enricher
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: obs-kafka
+      ports:
+        - port: 9092
+    - to:
+        - podSelector:
+            matchLabels:
+              app: timescaledb
+      ports:
+        - port: 5432
+---
+# ── detector ─────────────────────────────────────────────────────────────────
+# No ingress. Egress: Kafka + Redis + TimescaleDB.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-detector
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: detector
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: obs-kafka
+      ports:
+        - port: 9092
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: timescaledb
+      ports:
+        - port: 5432
+---
+# ── query-api ─────────────────────────────────────────────────────────────────
+# Ingress: only from dashboard pods on port 4000 (GraphQL HTTP + WebSocket).
+# Egress: TimescaleDB (queries) + Kafka (GraphQL subscription event stream via KafkaJS)
+#         + Redis (real-time pub/sub via mqemitter-redis for live dashboard updates).
+#
+# Why does query-api need Kafka and Redis?
+#   GraphQL subscriptions push live data to the browser. The query-api consumes
+#   the events.enriched topic from Kafka and uses Redis pub/sub (mqemitter-redis)
+#   to fan out events to connected WebSocket clients. Without these egress rules,
+#   the init containers (wait-for-kafka, wait-for-redis) would hang under default-deny
+#   and the query-api would never start.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-query-api
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: query-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: dashboard
+      ports:
+        - port: 4000
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: timescaledb
+      ports:
+        - port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: obs-kafka
+      ports:
+        - port: 9092
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+---
+# ── dashboard ─────────────────────────────────────────────────────────────────
+# Ingress: port 3000 from anywhere (Ingress controller).
+# Egress: query-api on 4000 (nginx.conf proxy_pass for /graphql).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dashboard
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: dashboard
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 3000
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: query-api
+      ports:
+        - port: 4000

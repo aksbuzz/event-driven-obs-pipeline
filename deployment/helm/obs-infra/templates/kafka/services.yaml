@@ -1,0 +1,37 @@
+# Headless service: gives each StatefulSet pod stable DNS (obs-kafka-0.obs-kafka-headless).
+# Required by StatefulSet spec.serviceName — enables broker-to-broker discovery.
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-kafka-headless
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: obs-kafka
+spec:
+  clusterIP: None
+  selector:
+    app: obs-kafka
+  ports:
+    - name: broker
+      port: 9092
+    - name: controller
+      port: 29093
+---
+# ClusterIP service: stable "obs-kafka:9092" address for app pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-kafka
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: obs-kafka
+spec:
+  selector:
+    app: obs-kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+    - name: controller
+      port: 29093
+      targetPort: 29093

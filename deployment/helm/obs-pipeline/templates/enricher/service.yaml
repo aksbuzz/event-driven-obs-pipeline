@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: enricher
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: enricher
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090

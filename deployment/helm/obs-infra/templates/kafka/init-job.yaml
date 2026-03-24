@@ -1,0 +1,63 @@
+# ConfigMap holds the topic-creation script as a file.
+# The Job mounts it and executes it — avoids baking a custom image.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-init-script
+  namespace: {{ .Values.namespace }}
+data:
+  create-topics.sh: |
+    #!/bin/bash
+    set -e
+    BOOTSTRAP="obs-kafka:9092"
+
+    echo "Waiting for Kafka broker at $BOOTSTRAP..."
+    until kafka-topics --bootstrap-server "$BOOTSTRAP" --list > /dev/null 2>&1; do
+      echo "  not ready yet, retrying in 3s..."
+      sleep 3
+    done
+    echo "Kafka ready."
+
+    create_topic() {
+      kafka-topics --bootstrap-server "$BOOTSTRAP" \
+        --create --if-not-exists \
+        --topic "$1" \
+        --partitions "$2" \
+        --replication-factor 1 \
+        --config retention.ms="$3" \
+        --config cleanup.policy=delete
+      echo "  created: $1"
+    }
+
+    create_topic "events.raw"       3   604800000
+    create_topic "events.enriched"  3   604800000
+    create_topic "events.dlq"       1   2592000000
+    create_topic "events.alerts"    1   86400000
+
+    echo "All topics created:"
+    kafka-topics --bootstrap-server "$BOOTSTRAP" --list
+---
+# Job runs once to completion. ttlSecondsAfterFinished auto-cleans after 5 min.
+# Script is idempotent (--if-not-exists) so safe to re-run on helm upgrade.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  namespace: {{ .Values.namespace }}
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-init
+          image: {{ .Values.kafka.image }}
+          command: ["bash", "/scripts/create-topics.sh"]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: kafka-init-script
+            defaultMode: 0755
